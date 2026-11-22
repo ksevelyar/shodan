@@ -4,15 +4,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use ratatui::{Terminal, backend::TestBackend};
 use serde_json::json;
-use shodan::{application::Application, interface::Interface};
 
 use super::support::{
-    finish_response, receive_request, render_interface, send_message, send_response_chunk,
-    start_mock_server, wait_for_update,
+    finish_response, read_history, read_screen, receive_request, run_test_application,
+    send_multiline_response_chunk, send_response_chunk, start_mock_server,
 };
 
 #[cfg(unix)]
@@ -90,12 +88,9 @@ fn user_exits_with_ctrl_c() {
 #[tokio::test]
 async fn user_starts_session_and_scrolls_through_long_response() {
     let (server_address, mut requests) = start_mock_server().await;
-    let application = Application::build(server_address);
-    let mut interface = Interface::new(application);
-    let mut terminal = Terminal::new(TestBackend::new(80, 12))
-        .expect("the feature test creates a terminal viewport");
+    let mut application = run_test_application(server_address, 80, 12);
 
-    send_message(&mut interface, "say hi in spanish");
+    application.send_message("say hi in spanish");
     let first_request = receive_request(&mut requests).await;
     assert_eq!(
         first_request.body["messages"],
@@ -104,15 +99,22 @@ async fn user_starts_session_and_scrolls_through_long_response() {
             {"role": "user", "content": "say hi in spanish"}
         ])
     );
-    send_response_chunk(&first_request, "hola").await;
-    wait_for_update(&mut interface).await;
-    assert!(render_interface(&interface, &mut terminal).contains("hola"));
+    send_multiline_response_chunk(&first_request, "hola").await;
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("hola"))
+        .await;
     finish_response(&first_request, None).await;
-    wait_for_update(&mut interface).await;
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("test-model"))
+        .await;
 
     let question =
         "explain what Feynman meant when he said no one truly understands quantum mechanics";
-    send_message(&mut interface, question);
+    application.enter_text(question);
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("quantum mechanics"))
+        .await;
+    application.press_key(KeyCode::Enter);
     let second_request = receive_request(&mut requests).await;
     assert_eq!(
         second_request.body["messages"],
@@ -128,22 +130,32 @@ async fn user_starts_session_and_scrolls_through_long_response() {
         .split_once("\n\n")
         .expect("the long response contains multiple paragraphs");
     send_response_chunk(&second_request, first_paragraph).await;
-    wait_for_update(&mut interface).await;
-    assert!(render_interface(&interface, &mut terminal).contains("Feynman meant"));
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("Feynman meant"))
+        .await;
     send_response_chunk(&second_request, &format!("\n\n{remaining_response}")).await;
-    wait_for_update(&mut interface).await;
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("comfortable picture"))
+        .await;
     finish_response(&second_request, None).await;
-    wait_for_update(&mut interface).await;
-    assert!(render_interface(&interface, &mut terminal).contains("comfortable picture"));
 
     for _ in 0..20 {
-        interface.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+        application.press_key(KeyCode::PageUp);
     }
-    let earlier_history = render_interface(&interface, &mut terminal);
-    assert!(earlier_history.contains("say hi in spanish"));
-    assert!(earlier_history.contains("hola"));
+    let earlier_history = application
+        .wait_for_screen(|screen| {
+            let contents = read_screen(screen);
+            contents.contains("say hi in spanish") && contents.contains("hola")
+        })
+        .await;
+    application.press_key(KeyCode::PageDown);
+    application
+        .wait_for_screen(|screen| read_history(screen) != read_history(&earlier_history))
+        .await;
     for _ in 0..20 {
-        interface.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+        application.press_key(KeyCode::PageDown);
     }
-    assert!(render_interface(&interface, &mut terminal).contains("comfortable picture"));
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("comfortable picture"))
+        .await;
 }

@@ -1,4 +1,4 @@
-use std::{convert::Infallible, time::Duration};
+use std::{convert::Infallible, io, time::Duration};
 
 use axum::{
     Json, Router,
@@ -8,12 +8,24 @@ use axum::{
     response::Response,
     routing::post,
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{Terminal, backend::TestBackend};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::{
+    backend::{Backend, ClearType, TestBackend, WindowSize},
+    buffer::{Buffer, Cell},
+    layout::{Position, Size},
+};
 use serde_json::{Value, json};
-use shodan::interface::Interface;
-use tokio::{net::TcpListener, sync::mpsc, time::timeout};
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
+use shodan::application::{TerminalMode, build_application, run_application};
+use tokio::{
+    net::TcpListener,
+    sync::{mpsc, watch},
+    task::JoinHandle,
+    time::timeout,
+};
+use tokio_stream::{
+    StreamExt,
+    wrappers::{ReceiverStream, UnboundedReceiverStream},
+};
 
 pub struct CapturedRequest {
     pub body: Value,
@@ -63,13 +75,6 @@ pub async fn start_mock_server() -> (String, mpsc::Receiver<CapturedRequest>) {
     (format!("http://{address}"), receiver)
 }
 
-pub fn send_message(interface: &mut Interface, message: &str) {
-    for character in message.chars() {
-        interface.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
-    }
-    interface.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-}
-
 pub async fn receive_request(requests: &mut mpsc::Receiver<CapturedRequest>) -> CapturedRequest {
     let request_timeout = Duration::from_secs(5);
     timeout(request_timeout, requests.recv())
@@ -91,6 +96,16 @@ pub async fn send_response_chunk(request: &CapturedRequest, content: &str) {
         .send(format!("data: {chunk}\n\n"))
         .await
         .expect("the application receives the streamed response");
+}
+
+pub async fn send_multiline_response_chunk(request: &CapturedRequest, content: &str) {
+    let content = json!(content);
+    request
+        .response_chunks
+        .send("data: {\"id\":\"chatcmpl-test\",\n".to_owned())
+        .await
+        .expect("the application receives the streamed response");
+    request.response_chunks.send(format!("data: \"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"test-model\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":{content}}},\"finish_reason\":null}}]}}\n\n")).await.expect("the application receives the streamed response");
 }
 
 pub async fn finish_response(request: &CapturedRequest, usage: Option<Value>) {
@@ -118,22 +133,152 @@ pub async fn finish_response(request: &CapturedRequest, usage: Option<Value>) {
         .await
         .expect("the application receives the end of the response");
 }
-
-pub async fn wait_for_update(interface: &mut Interface) {
-    let update_timeout = Duration::from_secs(5);
-    timeout(update_timeout, interface.wait_for_update())
-        .await
-        .expect("the interface receives a model response");
+struct SharedTerminal {
+    backend: TestBackend,
+    frames: watch::Sender<Buffer>,
 }
 
-pub fn render_interface(interface: &Interface, terminal: &mut Terminal<TestBackend>) -> String {
-    terminal
-        .draw(|frame| interface.draw(frame))
-        .expect("the interface draws in the test terminal");
-    let buffer = terminal.backend().buffer();
-    buffer
-        .content()
+impl Backend for SharedTerminal {
+    type Error = Infallible;
+
+    fn draw<'a, Content>(&mut self, content: Content) -> Result<(), Self::Error>
+    where
+        Content: Iterator<Item = (u16, u16, &'a Cell)>,
+    {
+        self.backend.draw(content)
+    }
+
+    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+        self.backend.hide_cursor()
+    }
+
+    fn show_cursor(&mut self) -> Result<(), Self::Error> {
+        self.backend.show_cursor()
+    }
+
+    fn get_cursor_position(&mut self) -> Result<Position, Self::Error> {
+        self.backend.get_cursor_position()
+    }
+
+    fn set_cursor_position<Coordinate: Into<Position>>(
+        &mut self,
+        position: Coordinate,
+    ) -> Result<(), Self::Error> {
+        self.backend.set_cursor_position(position)
+    }
+
+    fn clear(&mut self) -> Result<(), Self::Error> {
+        self.backend.clear()
+    }
+
+    fn clear_region(&mut self, clear_type: ClearType) -> Result<(), Self::Error> {
+        self.backend.clear_region(clear_type)
+    }
+
+    fn size(&self) -> Result<Size, Self::Error> {
+        self.backend.size()
+    }
+
+    fn window_size(&mut self) -> Result<WindowSize, Self::Error> {
+        self.backend.window_size()
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        let backend = &mut self.backend;
+        backend.flush()?;
+        self.frames.send_replace(backend.buffer().clone());
+        Ok(())
+    }
+}
+
+pub struct TestApplication {
+    events: mpsc::UnboundedSender<io::Result<Event>>,
+    frames: watch::Receiver<Buffer>,
+    task: JoinHandle<io::Result<()>>,
+}
+
+pub fn run_test_application(server_address: String, width: u16, height: u16) -> TestApplication {
+    let backend = TestBackend::new(width, height);
+    let (frames, receiver) = watch::channel(backend.buffer().clone());
+    let backend = SharedTerminal { backend, frames };
+    let (events, event_receiver) = mpsc::unbounded_channel();
+    let (application, interface, updates) = build_application(
+        server_address,
+        backend,
+        UnboundedReceiverStream::new(event_receiver),
+        TerminalMode::Unmanaged,
+    )
+    .expect("the feature test builds the application");
+    let task = tokio::spawn(run_application(application, interface, updates));
+    TestApplication {
+        events,
+        frames: receiver,
+        task,
+    }
+}
+
+impl TestApplication {
+    pub fn press_key(&self, code: KeyCode) {
+        let key = KeyEvent::new(code, KeyModifiers::NONE);
+        self.events
+            .send(Ok(Event::Key(key)))
+            .expect("the application receives terminal input");
+    }
+
+    pub fn enter_text(&self, text: &str) {
+        for character in text.chars() {
+            self.press_key(KeyCode::Char(character));
+        }
+    }
+
+    pub fn send_message(&self, message: &str) {
+        self.enter_text(message);
+        self.press_key(KeyCode::Enter);
+    }
+
+    pub async fn wait_for_screen(&mut self, matches: impl Fn(&Buffer) -> bool) -> Buffer {
+        let screen_timeout = Duration::from_secs(5);
+        timeout(screen_timeout, async {
+            loop {
+                let screen = self.frames.borrow_and_update().clone();
+                if matches(&screen) {
+                    return screen;
+                }
+                self.frames
+                    .changed()
+                    .await
+                    .expect("the application continues drawing");
+            }
+        })
+        .await
+        .expect("the application displays the expected screen")
+    }
+}
+
+impl Drop for TestApplication {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+pub fn read_screen(buffer: &Buffer) -> String {
+    buffer.content().iter().map(Cell::symbol).collect()
+}
+
+pub fn read_history(buffer: &Buffer) -> String {
+    let width = usize::from(buffer.area.width);
+    let height = usize::from(buffer.area.height);
+    buffer.content()[..height.saturating_sub(2) * width]
         .iter()
-        .map(ratatui::buffer::Cell::symbol)
+        .map(Cell::symbol)
+        .collect()
+}
+
+pub fn read_bottom_line(buffer: &Buffer) -> String {
+    let width = usize::from(buffer.area.width);
+    let height = usize::from(buffer.area.height);
+    buffer.content()[(height - 1) * width..]
+        .iter()
+        .map(Cell::symbol)
         .collect()
 }

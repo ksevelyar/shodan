@@ -1,4 +1,4 @@
-# Shodan
+# Shodan [![CI](https://github.com/ksevelyar/shodan/actions/workflows/ci.yml/badge.svg)](https://github.com/ksevelyar/shodan/actions/workflows/ci.yml)
 
 Shodan is a console agent inspired by pi.
 

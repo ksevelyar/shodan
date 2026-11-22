@@ -1,39 +1,23 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{Terminal, backend::TestBackend};
+use crossterm::event::KeyCode;
 use serde_json::json;
-use shodan::{application::Application, interface::Interface};
 
 use super::support::{
-    finish_response, receive_request, send_message, send_response_chunk, start_mock_server,
-    wait_for_update,
+    finish_response, read_bottom_line, read_history, read_screen, receive_request,
+    run_test_application, send_response_chunk, start_mock_server,
 };
-
-fn read_bottom_line(interface: &Interface, terminal: &mut Terminal<TestBackend>) -> String {
-    terminal
-        .draw(|frame| interface.draw(frame))
-        .expect("the interface draws in the test terminal");
-    let buffer = terminal.backend().buffer();
-    let width = usize::from(buffer.area.width);
-    let height = usize::from(buffer.area.height);
-    buffer.content()[(height - 1) * width..]
-        .iter()
-        .map(ratatui::buffer::Cell::symbol)
-        .collect()
-}
 
 #[tokio::test]
 async fn user_views_session_statistics() {
     let (server_address, mut requests) = start_mock_server().await;
-    let application = Application::build(server_address);
-    let mut interface = Interface::new(application);
-    let mut terminal = Terminal::new(TestBackend::new(120, 12))
-        .expect("the feature test creates a terminal viewport");
+    let mut application = run_test_application(server_address, 120, 12);
 
-    send_message(&mut interface, "explain quantum mechanics");
+    application.send_message("explain quantum mechanics");
     let request = receive_request(&mut requests).await;
     let response = include_str!("fixtures/feynman-response.txt");
     send_response_chunk(&request, response).await;
-    wait_for_update(&mut interface).await;
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("comfortable picture"))
+        .await;
     let usage = json!({
         "prompt_tokens": 52000,
         "completion_tokens": 12000,
@@ -41,10 +25,11 @@ async fn user_views_session_statistics() {
         "prompt_tokens_details": {"cached_tokens": 51844}
     });
     finish_response(&request, Some(usage)).await;
-    wait_for_update(&mut interface).await;
+    let screen = application
+        .wait_for_screen(|screen| read_bottom_line(screen).starts_with("↑156 ↓12k CH99.7%"))
+        .await;
 
-    let status = read_bottom_line(&interface, &mut terminal);
-    assert!(status.starts_with("↑156 ↓12k CH99.7%"));
+    let status = read_bottom_line(&screen);
     let provider_position = status
         .find("llama.cpp")
         .expect("the status panel displays the provider");
@@ -53,6 +38,9 @@ async fn user_views_session_statistics() {
     assert!(status.contains("test-model"));
     assert!(status.contains('⏱'));
 
-    interface.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
-    assert_eq!(read_bottom_line(&interface, &mut terminal), status);
+    application.press_key(KeyCode::PageUp);
+    let scrolled_screen = application
+        .wait_for_screen(|scrolled| read_history(scrolled) != read_history(&screen))
+        .await;
+    assert_eq!(read_bottom_line(&scrolled_screen), status);
 }
