@@ -1,9 +1,0 @@
-Feynman meant that quantum mechanics is remarkably successful at predicting experiments, but its behavior is difficult to reconcile with everyday intuition.
-
-For example, a quantum object can be described by a combination of possible states. The theory tells us how to calculate the probabilities of measurement outcomes, but it does not give us a simple everyday picture of what the object was doing before measurement.
-
-This does not mean physicists know nothing about quantum mechanics. They understand its mathematics and can test its predictions with extraordinary precision. The difficulty is explaining why nature follows those rules and how the mathematical description relates to what we observe.
-
-Different interpretations offer different answers to those questions. They generally agree on the predictions, so choosing between them is harder than checking whether the calculations work.
-
-Feynman's warning is therefore a reminder to be cautious with familiar analogies. An electron is not simply a tiny ball, nor is it just a wave in the everyday sense. Quantum mechanics asks us to accept a description that works even when no comfortable picture captures all of it.

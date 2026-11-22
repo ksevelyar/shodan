@@ -4,16 +4,44 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use ratatui::{Terminal, backend::TestBackend};
-use serde_json::json;
-use shodan::{application::Application, interface::Interface};
-
 use super::support::{
-    finish_response, receive_request, render_interface, send_message, send_response_chunk,
-    start_mock_server, wait_for_update,
+    ASTEROIDS_PLAN_PROMPT, RecordedModels, assert_received_messages, read_bottom_line,
+    read_history, read_screen, receive_request_or_error, run_test_application,
+    send_initial_recorded_response, send_remaining_recorded_response, start_mock_server,
 };
+use crossterm::event::KeyCode;
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use ratatui::style::Color;
+
+#[tokio::test]
+async fn user_composes_message() {
+    let (server_address, _requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let mut application = run_test_application(server_address, 80, 12);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
+        .await;
+    application.enter_text("Hello");
+    let screen = application
+        .wait_for_screen(|screen| read_screen(screen).contains("Hello"))
+        .await;
+    for row in [screen.area.height - 4, screen.area.height - 2] {
+        for column in 0..screen.area.width {
+            let cell = &screen[(column, row)];
+            assert_eq!(cell.symbol(), "─");
+            assert_eq!(cell.fg, Color::Gray);
+        }
+    }
+    application.press_key(KeyCode::Enter);
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen).contains("Hello"))
+        .await;
+    let row = (0..screen.area.height - 4)
+        .find(|&row| screen[(0, row)].symbol() == "H")
+        .expect("the user message is visible");
+    for column in 0..screen.area.width {
+        assert_eq!(screen[(column, row)].bg, Color::Rgb(55, 55, 55));
+    }
+}
 
 #[cfg(unix)]
 #[test]
@@ -89,61 +117,52 @@ fn user_exits_with_ctrl_c() {
 
 #[tokio::test]
 async fn user_starts_session_and_scrolls_through_long_response() {
-    let (server_address, mut requests) = start_mock_server().await;
-    let application = Application::build(server_address);
-    let mut interface = Interface::new(application);
-    let mut terminal = Terminal::new(TestBackend::new(80, 12))
-        .expect("the feature test creates a terminal viewport");
+    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let mut application = run_test_application(server_address, 80, 12);
 
-    send_message(&mut interface, "say hi in spanish");
-    let first_request = receive_request(&mut requests).await;
-    assert_eq!(
-        first_request.body["messages"],
-        json!([
-            {"role": "system", "content": "you are helpful assistent"},
-            {"role": "user", "content": "say hi in spanish"}
-        ])
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
+        .await;
+    application.send_message(ASTEROIDS_PLAN_PROMPT);
+    let request = receive_request_or_error(&mut requests, &mut application).await;
+    assert_received_messages(
+        &request,
+        &[
+            ("system", "you are helpful assistent"),
+            ("user", ASTEROIDS_PLAN_PROMPT),
+        ],
     );
-    send_response_chunk(&first_request, "hola").await;
-    wait_for_update(&mut interface).await;
-    assert!(render_interface(&interface, &mut terminal).contains("hola"));
-    finish_response(&first_request, None).await;
-    wait_for_update(&mut interface).await;
+    let before_response = application
+        .wait_for_screen(|screen| read_history(screen).contains("Write a proof-of-concept plan"))
+        .await;
+    send_initial_recorded_response(&request).await;
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen) != read_history(&before_response))
+        .await;
+    let history = read_history(&screen);
+    assert!(history.contains("##"));
+    send_remaining_recorded_response(&request).await;
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("restart the game."))
+        .await;
 
-    let question =
-        "explain what Feynman meant when he said no one truly understands quantum mechanics";
-    send_message(&mut interface, question);
-    let second_request = receive_request(&mut requests).await;
-    assert_eq!(
-        second_request.body["messages"],
-        json!([
-            {"role": "system", "content": "you are helpful assistent"},
-            {"role": "user", "content": "say hi in spanish"},
-            {"role": "assistant", "content": "hola"},
-            {"role": "user", "content": question}
-        ])
-    );
-    let response = include_str!("fixtures/feynman-response.txt");
-    let (first_paragraph, remaining_response) = response
-        .split_once("\n\n")
-        .expect("the long response contains multiple paragraphs");
-    send_response_chunk(&second_request, first_paragraph).await;
-    wait_for_update(&mut interface).await;
-    assert!(render_interface(&interface, &mut terminal).contains("Feynman meant"));
-    send_response_chunk(&second_request, &format!("\n\n{remaining_response}")).await;
-    wait_for_update(&mut interface).await;
-    finish_response(&second_request, None).await;
-    wait_for_update(&mut interface).await;
-    assert!(render_interface(&interface, &mut terminal).contains("comfortable picture"));
-
-    for _ in 0..20 {
-        interface.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+    for _ in 0..100 {
+        application.press_key(KeyCode::PageUp);
     }
-    let earlier_history = render_interface(&interface, &mut terminal);
-    assert!(earlier_history.contains("say hi in spanish"));
-    assert!(earlier_history.contains("hola"));
-    for _ in 0..20 {
-        interface.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+    let earlier_history = application
+        .wait_for_screen(|screen| {
+            let contents = read_screen(screen);
+            contents.contains("Write a proof-of-concept plan")
+        })
+        .await;
+    application.press_key(KeyCode::PageDown);
+    application
+        .wait_for_screen(|screen| read_history(screen) != read_history(&earlier_history))
+        .await;
+    for _ in 0..100 {
+        application.press_key(KeyCode::PageDown);
     }
-    assert!(render_interface(&interface, &mut terminal).contains("comfortable picture"));
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("restart the game."))
+        .await;
 }

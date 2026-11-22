@@ -1,58 +1,116 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{Terminal, backend::TestBackend};
-use serde_json::json;
-use shodan::{application::Application, interface::Interface};
-
 use super::support::{
-    finish_response, receive_request, send_message, send_response_chunk, start_mock_server,
-    wait_for_update,
+    ASTEROIDS_PLAN_PROMPT, RecordedModels, assert_received_messages, read_bottom_line,
+    read_history, receive_request, run_test_application, send_recorded_response, start_mock_server,
 };
+use std::time::Duration;
 
-fn read_bottom_line(interface: &Interface, terminal: &mut Terminal<TestBackend>) -> String {
-    terminal
-        .draw(|frame| interface.draw(frame))
-        .expect("the interface draws in the test terminal");
-    let buffer = terminal.backend().buffer();
-    let width = usize::from(buffer.area.width);
-    let height = usize::from(buffer.area.height);
-    buffer.content()[(height - 1) * width..]
-        .iter()
-        .map(ratatui::buffer::Cell::symbol)
-        .collect()
-}
+use crossterm::event::KeyCode;
 
 #[tokio::test]
 async fn user_views_session_statistics() {
-    let (server_address, mut requests) = start_mock_server().await;
-    let application = Application::build(server_address);
-    let mut interface = Interface::new(application);
-    let mut terminal = Terminal::new(TestBackend::new(120, 12))
-        .expect("the feature test creates a terminal viewport");
+    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let mut application = run_test_application(server_address, 120, 12);
 
-    send_message(&mut interface, "explain quantum mechanics");
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
+        .await;
+    application.send_message(ASTEROIDS_PLAN_PROMPT);
     let request = receive_request(&mut requests).await;
-    let response = include_str!("fixtures/feynman-response.txt");
-    send_response_chunk(&request, response).await;
-    wait_for_update(&mut interface).await;
-    let usage = json!({
-        "prompt_tokens": 52000,
-        "completion_tokens": 12000,
-        "total_tokens": 64000,
-        "prompt_tokens_details": {"cached_tokens": 51844}
-    });
-    finish_response(&request, Some(usage)).await;
-    wait_for_update(&mut interface).await;
+    assert_received_messages(
+        &request,
+        &[
+            ("system", "you are helpful assistent"),
+            ("user", ASTEROIDS_PLAN_PROMPT),
+        ],
+    );
+    send_recorded_response(&request).await;
+    let screen = application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("↑82 ↓383 CH0.0%"))
+        .await;
 
-    let status = read_bottom_line(&interface, &mut terminal);
-    assert!(status.starts_with("↑156 ↓12k CH99.7%"));
+    let status = read_bottom_line(&screen);
     let provider_position = status
         .find("llama.cpp")
         .expect("the status panel displays the provider");
     let provider_column = status[..provider_position].chars().count();
     assert!(provider_column >= 60);
-    assert!(status.contains("test-model"));
-    assert!(status.contains('⏱'));
+    assert!(status.contains("LFM3-Omni-2B-Q4_K_M"));
+}
 
-    interface.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
-    assert_eq!(read_bottom_line(&interface, &mut terminal), status);
+#[tokio::test]
+async fn user_scrolls_conversation() {
+    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let mut application = run_test_application(server_address, 120, 12);
+
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
+        .await;
+    application.send_message(ASTEROIDS_PLAN_PROMPT);
+    let request = receive_request(&mut requests).await;
+    send_recorded_response(&request).await;
+    let screen = application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("↑82 ↓383 CH0.0%"))
+        .await;
+    let status = read_bottom_line(&screen);
+
+    application.press_key(KeyCode::PageUp);
+    let scrolled_screen = application
+        .wait_for_screen(|scrolled| read_history(scrolled) != read_history(&screen))
+        .await;
+    assert_eq!(read_bottom_line(&scrolled_screen), status);
+}
+
+#[tokio::test]
+async fn user_views_response_time() {
+    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let mut application = run_test_application(server_address, 120, 12);
+
+    application
+        .wait_for_screen(|screen| {
+            let status = read_bottom_line(screen);
+            status.starts_with("↑0 ↓0 CH0.0%") && status.contains("LFM3-Omni-2B-Q4_K_M")
+        })
+        .await;
+    application.send_message(ASTEROIDS_PLAN_PROMPT);
+    let request = receive_request(&mut requests).await;
+    let screen = application
+        .wait_for_screen(|screen| {
+            read_bottom_line(screen)
+                .chars()
+                .any(|character| ('⠁'..='⣿').contains(&character))
+        })
+        .await;
+    let status = read_bottom_line(&screen);
+    assert!(status.ends_with("llama.cpp LFM3-Omni-2B-Q4_K_M"));
+    assert!(status.contains(" ↑0 ↓0 CH0.0%"));
+    let spinner = status
+        .chars()
+        .find(|character| ('⠁'..='⣿').contains(character))
+        .expect("the status panel displays a spinner");
+    assert!(status.starts_with(spinner));
+    application
+        .wait_for_screen(|screen| {
+            read_bottom_line(screen)
+                .chars()
+                .any(|character| ('⠁'..='⣿').contains(&character) && character != spinner)
+        })
+        .await;
+
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_millis(5200)).await;
+    send_recorded_response(&request).await;
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).starts_with("⏱ 5s ↑82 ↓383 CH0.0%"))
+        .await;
+    tokio::time::resume();
+
+    application.send_message(ASTEROIDS_PLAN_PROMPT);
+    let request = receive_request(&mut requests).await;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(72)).await;
+    send_recorded_response(&request).await;
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).starts_with("⏱ 1m 12s ↑164 ↓766 CH0.0%"))
+        .await;
+    tokio::time::resume();
 }
