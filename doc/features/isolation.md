@@ -1,4 +1,8 @@
+# Isolation
+
 ## Requirements
 
-* Nix provides isolation from the host system. Starting an agent session always creates a capsule.
+* Each agent session is isolated from the host system.
 * By default, access is restricted except to /tmp and the directory where the session started.
+
+## User scenarios
