@@ -16,7 +16,7 @@ use axum::{
     response::Response,
     routing::{get, post},
 };
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{
     backend::{Backend, ClearType, TestBackend, WindowSize},
     buffer::{Buffer, Cell},
@@ -312,6 +312,18 @@ impl TestApplication {
         let key = KeyEvent::new(code, KeyModifiers::NONE);
         self.events
             .send(Ok(Event::Key(key)))
+            .expect("the application receives terminal input");
+    }
+
+    pub fn scroll_mouse(&self, kind: MouseEventKind, column: u16, row: u16) {
+        let mouse = MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        self.events
+            .send(Ok(Event::Mouse(mouse)))
             .expect("the application receives terminal input");
     }
 

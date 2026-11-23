@@ -1,7 +1,10 @@
 use std::{io, ops::ControlFlow};
 
 use crossterm::{
-    event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    event::{
+        DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers, MouseEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -24,6 +27,7 @@ use crate::{
 struct TerminalSession {
     alternate_screen: bool,
     raw_mode: bool,
+    mouse_capture: bool,
 }
 
 impl TerminalSession {
@@ -32,13 +36,25 @@ impl TerminalSession {
         let mut session = Self {
             alternate_screen: false,
             raw_mode: true,
+            mouse_capture: false,
         };
         execute!(io::stdout(), EnterAlternateScreen)?;
         session.alternate_screen = true;
+        session.mouse_capture = true;
+        execute!(io::stdout(), EnableMouseCapture)?;
         Ok(session)
     }
 
     fn restore(&mut self) -> io::Result<()> {
+        let mouse_result = if self.mouse_capture {
+            let result = execute!(io::stdout(), DisableMouseCapture);
+            if result.is_ok() {
+                self.mouse_capture = false;
+            }
+            result
+        } else {
+            Ok(())
+        };
         let screen_result = if self.alternate_screen {
             let result = execute!(io::stdout(), LeaveAlternateScreen);
             if result.is_ok() {
@@ -57,7 +73,7 @@ impl TerminalSession {
         } else {
             Ok(())
         };
-        screen_result.and(raw_result)
+        mouse_result.and(screen_result).and(raw_result)
     }
 }
 
@@ -135,6 +151,7 @@ where
 #[derive(Clone, Copy)]
 pub(crate) enum InterfaceInput {
     Key(KeyEvent),
+    Mouse(MouseEventKind),
     Exit,
     Redraw,
 }
@@ -150,6 +167,7 @@ where
         Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => {
             Ok(InterfaceInput::Key(key))
         }
+        Some(Ok(Event::Mouse(mouse))) => Ok(InterfaceInput::Mouse(mouse.kind)),
         Some(Ok(_)) => Ok(InterfaceInput::Redraw),
         Some(Err(error)) => Err(error),
         None => Ok(InterfaceInput::Exit),
@@ -169,6 +187,14 @@ pub(crate) fn handle_input(
         }
         InterfaceInput::Key(key) => {
             handle_key(application, key);
+            ControlFlow::Continue(())
+        }
+        InterfaceInput::Mouse(kind) => {
+            match kind {
+                MouseEventKind::ScrollUp => scroll_up(application, 1),
+                MouseEventKind::ScrollDown => scroll_down(application, 1),
+                _ => {}
+            }
             ControlFlow::Continue(())
         }
         InterfaceInput::Redraw => ControlFlow::Continue(()),
@@ -194,20 +220,24 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
             send_message(application, input);
             application.scroll_from_bottom = 0;
         }
-        KeyCode::PageUp => {
-            application.scroll_from_bottom = application
-                .scroll_from_bottom
-                .saturating_add(8)
-                .min(application.maximum_scroll);
-        }
-        KeyCode::PageDown => {
-            application.scroll_from_bottom = application
-                .scroll_from_bottom
-                .min(application.maximum_scroll)
-                .saturating_sub(8);
-        }
+        KeyCode::PageUp => scroll_up(application, 8),
+        KeyCode::PageDown => scroll_down(application, 8),
         _ => {}
     }
+}
+
+fn scroll_up(application: &mut Application, lines: usize) {
+    application.scroll_from_bottom = application
+        .scroll_from_bottom
+        .saturating_add(lines)
+        .min(application.maximum_scroll);
+}
+
+fn scroll_down(application: &mut Application, lines: usize) {
+    application.scroll_from_bottom = application
+        .scroll_from_bottom
+        .min(application.maximum_scroll)
+        .saturating_sub(lines);
 }
 
 pub(crate) fn draw_interface(

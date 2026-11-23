@@ -7,11 +7,46 @@ use std::{
 use super::support::{
     ASTEROIDS_PLAN_PROMPT, RecordedModels, assert_received_messages, read_bottom_line,
     read_history, read_screen, receive_request_or_error, run_test_application,
-    send_initial_recorded_response, send_remaining_recorded_response, start_mock_server,
+    send_initial_recorded_response, send_recorded_response, send_remaining_recorded_response,
+    start_mock_server,
 };
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, MouseEventKind};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use ratatui::style::Color;
+
+#[tokio::test]
+async fn user_scrolls_conversation_history_with_mouse_wheel() {
+    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let mut application = run_test_application(server_address, 80, 12);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
+        .await;
+    application.send_message(ASTEROIDS_PLAN_PROMPT);
+    let request = receive_request_or_error(&mut requests, &mut application).await;
+    send_recorded_response(&request).await;
+    let bottom_screen = application
+        .wait_for_screen(|screen| read_screen(screen).contains("restart the game."))
+        .await;
+    let bottom_history = read_history(&bottom_screen);
+
+    application.scroll_mouse(MouseEventKind::ScrollUp, 0, 9);
+    let earlier_screen = application
+        .wait_for_screen(|screen| read_history(screen) != bottom_history)
+        .await;
+    let earlier_history = read_history(&earlier_screen);
+    let width = usize::from(earlier_screen.area.width);
+    let earlier_lines = earlier_history.chars().skip(width).collect::<String>();
+    let bottom_lines = bottom_history
+        .chars()
+        .take(earlier_lines.chars().count())
+        .collect::<String>();
+    assert_eq!(earlier_lines, bottom_lines);
+
+    application.scroll_mouse(MouseEventKind::ScrollDown, 0, 11);
+    application
+        .wait_for_screen(|screen| read_history(screen) == bottom_history)
+        .await;
+}
 
 #[tokio::test]
 async fn user_composes_message() {
