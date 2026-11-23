@@ -20,9 +20,25 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    application::{Application, Statistics},
+    application::{Application, Statistics, abort_response},
     chats::{Message, Role, send_message},
 };
+
+enum Palette {
+    DarkGrey,
+    Grey,
+    Pink,
+}
+
+impl From<Palette> for Color {
+    fn from(color: Palette) -> Self {
+        match color {
+            Palette::DarkGrey => Self::Rgb(55, 55, 55),
+            Palette::Grey => Self::Gray,
+            Palette::Pink => Self::Rgb(255, 16, 240),
+        }
+    }
+}
 
 struct TerminalSession {
     alternate_screen: bool,
@@ -211,6 +227,7 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
         KeyCode::Backspace => {
             application.input.pop();
         }
+        KeyCode::Esc => abort_response(application),
         KeyCode::Enter
             if application.statistics.response_started.is_none()
                 && !application.statistics.model.is_empty()
@@ -272,14 +289,21 @@ pub(crate) fn draw_interface(
             for wrapped_line in wrapped_lines {
                 if matches!(message.role, Role::User) {
                     let padding = width.saturating_sub(wrapped_line.width());
-                    let background = Color::Rgb(55, 55, 55);
                     lines.push(
                         Line::from(format!("{wrapped_line}{}", " ".repeat(padding)))
-                            .style(Style::default().bg(background)),
+                            .style(Style::default().bg(Color::from(Palette::DarkGrey))),
                     );
                 } else {
                     lines.push(Line::from(wrapped_line.into_owned()));
                 }
+            }
+        }
+        if message.aborted {
+            for line in textwrap::wrap("Request was aborted", width) {
+                lines.push(
+                    Line::from(line.into_owned())
+                        .style(Style::default().fg(Color::from(Palette::Pink))),
+                );
             }
         }
         lines.push(Line::default());
@@ -303,7 +327,7 @@ pub(crate) fn draw_interface(
     for area in [areas[1], areas[3]] {
         let line = "─".repeat(usize::from(area.width));
         frame.render_widget(
-            Paragraph::new(line).style(Style::default().fg(Color::Gray)),
+            Paragraph::new(line).style(Style::default().fg(Color::from(Palette::Grey))),
             area,
         );
     }

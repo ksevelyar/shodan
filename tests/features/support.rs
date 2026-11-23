@@ -203,6 +203,13 @@ pub async fn send_remaining_recorded_response(request: &CapturedRequest) {
     send_response_bytes(request, split_recorded_response().1).await;
 }
 
+pub async fn wait_for_response_disconnect(request: &CapturedRequest) {
+    let disconnect_timeout = Duration::from_secs(5);
+    timeout(disconnect_timeout, request.response_chunks.closed())
+        .await
+        .expect("the application disconnects from the response");
+}
+
 async fn send_response_bytes(request: &CapturedRequest, response: &str) {
     request
         .response_chunks

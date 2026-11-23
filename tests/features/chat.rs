@@ -8,11 +8,71 @@ use super::support::{
     ASTEROIDS_PLAN_PROMPT, RecordedModels, assert_received_messages, read_bottom_line,
     read_history, read_screen, receive_request_or_error, run_test_application,
     send_initial_recorded_response, send_recorded_response, send_remaining_recorded_response,
-    start_mock_server,
+    start_mock_server, wait_for_response_disconnect,
 };
 use crossterm::event::{KeyCode, MouseEventKind};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use ratatui::style::Color;
+
+#[tokio::test]
+async fn user_aborts_model_response() {
+    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let mut application = run_test_application(server_address, 80, 24);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
+        .await;
+
+    application.send_message(ASTEROIDS_PLAN_PROMPT);
+    let first_request = receive_request_or_error(&mut requests, &mut application).await;
+    send_initial_recorded_response(&first_request).await;
+    application
+        .wait_for_screen(|screen| {
+            (0..screen.area.height - 4).any(|row| {
+                let line = (0..screen.area.width)
+                    .map(|column| screen[(column, row)].symbol())
+                    .collect::<String>();
+                line.trim() == "##"
+            })
+        })
+        .await;
+
+    application.press_key(KeyCode::Esc);
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen).contains("Request was aborted"))
+        .await;
+    let notice_row = (1..screen.area.height - 4)
+        .find(|&row| {
+            let line = (0..screen.area.width)
+                .map(|column| screen[(column, row)].symbol())
+                .collect::<String>();
+            line.trim() == "Request was aborted"
+        })
+        .expect("the abort notice is visible");
+    let partial_response = (0..screen.area.width)
+        .map(|column| screen[(column, notice_row - 1)].symbol())
+        .collect::<String>();
+    assert_eq!(partial_response.trim(), "##");
+    for column in 0.."Request was aborted".len() {
+        let column = u16::try_from(column).expect("the notice fits in the terminal");
+        assert_eq!(screen[(column, notice_row)].fg, Color::Rgb(255, 16, 240));
+    }
+    wait_for_response_disconnect(&first_request).await;
+
+    application.send_message("Continue");
+    let second_request = receive_request_or_error(&mut requests, &mut application).await;
+    assert_received_messages(
+        &second_request,
+        &[
+            ("system", "you are helpful assistent"),
+            ("user", ASTEROIDS_PLAN_PROMPT),
+            ("user", "Continue"),
+        ],
+    );
+    send_recorded_response(&second_request).await;
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("restart the game."))
+        .await;
+}
 
 #[tokio::test]
 async fn user_scrolls_conversation_history_with_mouse_wheel() {

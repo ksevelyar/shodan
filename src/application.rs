@@ -8,7 +8,7 @@ use tokio::{sync::mpsc, time::Instant};
 use crate::{
     chats::{self, Message, build_chat},
     interface::{self, build_interface},
-    provider::ResponseUpdate,
+    provider::{self, ProviderEvent},
 };
 
 pub use crate::{
@@ -35,7 +35,8 @@ pub struct Application {
     pub(crate) messages: Vec<Message>,
     pub(crate) statistics: Statistics,
     pub(crate) error: Option<String>,
-    pub(crate) update_sender: mpsc::UnboundedSender<ResponseUpdate>,
+    pub(crate) provider_events: mpsc::UnboundedSender<ProviderEvent>,
+    pub(crate) active_request: Option<tokio::task::JoinHandle<()>>,
 }
 
 #[doc = "# Errors\nReturns an error if the terminal cannot be initialized."]
@@ -52,7 +53,7 @@ pub fn build_application<BackendType: Backend, EventSource>(
 where
     BackendType::Error: Send + Sync + 'static,
 {
-    let (messages, update_sender, updates) = build_chat();
+    let (messages, provider_events, updates) = build_chat();
     let interface = build_interface(backend, events, terminal_mode)?;
     let application = Application {
         server_address,
@@ -60,7 +61,8 @@ where
         messages,
         statistics: Statistics::default(),
         error: None,
-        update_sender,
+        provider_events,
+        active_request: None,
         input: String::new(),
         scroll_from_bottom: 0,
         maximum_scroll: 0,
@@ -81,17 +83,35 @@ where
 {
     let client = application.client.clone();
     let address = application.server_address.clone();
-    let updates_sender = application.update_sender.clone();
+    let updates_sender = application.provider_events.clone();
     tokio::spawn(async move {
-        let update = match crate::provider::select_model(&client, &address).await {
-            Ok(model) => ResponseUpdate::ModelSelected(model),
-            Err(error) => ResponseUpdate::Failed(error),
-        };
-        let _ = updates_sender.send(update);
+        crate::provider::select_model(&client, &address, &updates_sender).await;
     });
     let result = run_event_loop(&mut application, &mut interface, &mut updates).await;
+    if let Some(request) = application.active_request.take() {
+        request.abort();
+    }
     let restoration = interface::restore_terminal(&mut interface);
     result.and(restoration)
+}
+
+pub(crate) fn start_response(application: &mut Application, messages: Vec<Message>) {
+    let client = application.client.clone();
+    let address = application.server_address.clone();
+    let model = application.statistics.model.clone();
+    let provider_events = application.provider_events.clone();
+    application.active_request = Some(tokio::spawn(async move {
+        provider::stream_response(&client, &address, &model, &messages, &provider_events).await;
+    }));
+}
+
+pub(crate) fn abort_response(application: &mut Application) {
+    let Some(request) = application.active_request.take() else {
+        return;
+    };
+    request.abort();
+    application.statistics.response_started = None;
+    chats::mark_response_aborted(application);
 }
 
 async fn run_event_loop<BackendType, EventSource>(

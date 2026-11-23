@@ -6,6 +6,7 @@
 * Conversation history is retained during the session.
 * User can scroll conversation history one line at a time with the mouse wheel anywhere in the terminal.
 * Model responses stream as they are generated.
+* User can abort a request with Esc, stopping model processing and seeing `Request was aborted` in neon pink.
 * Conversation messages appear without role labels.
 * User messages have a dark grey background.
 * Light grey lines separate the message input from the conversation and status panel.
@@ -34,7 +35,16 @@
 * User sees a light grey line above and below the message input.
 * User sends the message and sees it with a dark grey background.
 
-### 4. User exits with Ctrl-C
+### 4. User aborts a model response
+
+* User sends a message and sees part of the model response.
+* User presses Esc.
+* Model stops processing the request.
+* User sees the partial response followed by `Request was aborted` in neon pink.
+* User sends another message.
+* Model receives the conversation without the aborted partial response and responds to the new message.
+
+### 5. User exits with Ctrl-C
 
 * User starts a session.
 * User presses Ctrl-C.
