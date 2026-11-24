@@ -86,39 +86,11 @@ pub async fn select_model(client: &reqwest::Client, address: &str, event_sender:
             name: model.id.clone(),
             thinking_level,
         };
-        if model.status.value == "loaded" {
-            return Ok(selected_model);
+        if model.status.value != "loaded" {
+            load_model(client, address, &model.id).await?;
         }
-        client
-            .post(format!("{address}/models/load"))
-            .json(&serde_json::json!({"model": model.id}))
-            .send()
-            .await
-            .map_err(|error| error.to_string())?
-            .error_for_status()
-            .map_err(|error| error.to_string())?;
-        let loading_timeout = std::time::Duration::from_secs(60);
-
-        tokio::time::timeout(loading_timeout, async {
-            loop {
-                let models = list_models(client, address).await?;
-                let status = models
-                    .data
-                    .iter()
-                    .find(|candidate| candidate.id == model.id)
-                    .map(|candidate| candidate.status.value.as_str());
-
-                match status {
-                    Some("loaded") => return Ok(selected_model),
-                    Some("loading") | None => {
-                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    }
-                    Some(status) => return Err(format!("model failed to load: {status}")),
-                }
-            }
-        })
-        .await
-        .map_err(|_| "model loading timed out".to_owned())?
+        wait_until_loaded(client, address, &model.id).await?;
+        Ok(selected_model)
     }
     .await;
     let event = match result {
@@ -126,6 +98,73 @@ pub async fn select_model(client: &reqwest::Client, address: &str, event_sender:
         Err(error) => Event::ModelSelectionFailed(error),
     };
     let _ = event_sender.send(event);
+}
+
+pub async fn cycle_model(
+    client: &reqwest::Client,
+    address: &str,
+    current_model: &str,
+    event_sender: &EventSender,
+) {
+    let result = async {
+        let models = list_models(client, address).await?;
+        let (model, thinking_level) = models::cycle_model(current_model, &models.data)
+            .ok_or_else(|| "no available models".to_owned())?;
+        let selected_model = SelectedModel {
+            name: model.id.clone(),
+            thinking_level,
+        };
+        if model.status.value != "loaded" {
+            load_model(client, address, &model.id).await?;
+        }
+        wait_until_loaded(client, address, &model.id).await?;
+        Ok(selected_model)
+    }
+    .await;
+    let event = match result {
+        Ok(model) => Event::ModelSelected(model),
+        Err(error) => Event::ModelSelectionFailed(error),
+    };
+    let _ = event_sender.send(event);
+}
+
+async fn load_model(client: &reqwest::Client, address: &str, model: &str) -> Result<(), String> {
+    client
+        .post(format!("{address}/models/load"))
+        .json(&serde_json::json!({"model": model}))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+async fn wait_until_loaded(
+    client: &reqwest::Client,
+    address: &str,
+    model: &str,
+) -> Result<(), String> {
+    let loading_timeout = std::time::Duration::from_secs(60);
+    tokio::time::timeout(loading_timeout, async {
+        loop {
+            let models = list_models(client, address).await?;
+            let status = models
+                .data
+                .iter()
+                .find(|candidate| candidate.id == model)
+                .map(|candidate| candidate.status.value.as_str());
+            match status {
+                Some("loaded") => return Ok(()),
+                Some("loading") | None => {
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                }
+                Some(status) => return Err(format!("model failed to load: {status}")),
+            }
+        }
+    })
+    .await
+    .map_err(|_| "model loading timed out".to_owned())?
 }
 
 pub async fn stream_response(

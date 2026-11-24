@@ -1,10 +1,8 @@
 use std::{
+    collections::VecDeque,
     convert::Infallible,
     io,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -42,80 +40,177 @@ pub struct CapturedRequest {
     response_chunks: mpsc::Sender<String>,
 }
 
-#[derive(Clone, Copy)]
-pub enum RecordedModels {
-    BothLoaded,
-    NoneRunning,
-    SecondLoaded,
-    QwenLoaded,
-    QwenUnloaded,
+#[derive(Default)]
+pub struct RecordedLlama {
+    available_models: Option<String>,
+    model_loads: Vec<(&'static str, String, String)>,
+    model_streams: Vec<(&'static str, VecDeque<String>)>,
+}
+
+impl RecordedLlama {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn mock_available_models(mut self, available_models: &str) -> Self {
+        self.available_models = Some(available_models.to_owned());
+        self
+    }
+
+    pub fn mock_model_load(
+        mut self,
+        model: &'static str,
+        loading_models: &str,
+        loaded_models: &str,
+    ) -> Self {
+        self.model_loads
+            .push((model, loading_models.to_owned(), loaded_models.to_owned()));
+        self
+    }
+
+    pub fn mock_stream(mut self, model: &'static str, stream_path: &str) -> Self {
+        match self
+            .model_streams
+            .iter_mut()
+            .find(|(streamed_model, _)| *streamed_model == model)
+        {
+            Some((_, streams)) => streams.push_back(stream_path.to_owned()),
+            None => self
+                .model_streams
+                .push((model, VecDeque::from([stream_path.to_owned()]))),
+        }
+        self
+    }
+
+    pub async fn start(self) -> (String, mpsc::Receiver<CapturedRequest>) {
+        let available_models = self
+            .available_models
+            .expect("the mock server replays available models");
+        let (requests, receiver) = mpsc::channel(8);
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("the mock server binds to a local port");
+        let address = listener
+            .local_addr()
+            .expect("the mock server has a local address");
+        let router = Router::new()
+            .route("/v1/models", get(list_models))
+            .route("/models/load", post(load_model))
+            .route("/v1/chat/completions", post(stream_response))
+            .with_state(LlamaState {
+                requests,
+                available_models: Arc::new(Mutex::new(AvailableModels::Serving(available_models))),
+                model_loads: self.model_loads,
+                model_streams: Arc::new(Mutex::new(self.model_streams)),
+            });
+        tokio::spawn(async move {
+            axum::serve(listener, router)
+                .await
+                .expect("the mock server serves requests");
+        });
+        (format!("http://{address}"), receiver)
+    }
+}
+
+enum AvailableModels {
+    Serving(String),
+    Loading {
+        loading: String,
+        loaded: String,
+        loading_served: bool,
+    },
+}
+
+type RecordedStreams = Vec<(&'static str, VecDeque<String>)>;
+
+fn read_fixture(fixture_path: &str) -> String {
+    std::fs::read_to_string(fixture_path)
+        .unwrap_or_else(|error| panic!("the mock server cannot read {fixture_path}: {error}"))
+}
+
+fn current_models(models: &mut AvailableModels) -> String {
+    match models {
+        AvailableModels::Serving(fixture_path) => read_fixture(fixture_path),
+        AvailableModels::Loading {
+            loading,
+            loaded,
+            loading_served,
+        } => {
+            if *loading_served {
+                read_fixture(loaded)
+            } else {
+                *loading_served = true;
+                read_fixture(loading)
+            }
+        }
+    }
+}
+
+fn assert_loaded_model(models_fixture: &str, requested_model: &str) {
+    let models: Value = serde_json::from_str(models_fixture).expect("the models fixture is JSON");
+    let loaded = models["data"]
+        .as_array()
+        .expect("the models fixture lists models")
+        .iter()
+        .any(|model| model["id"] == requested_model && model["status"]["value"] == "loaded");
+    assert!(
+        loaded,
+        "the application chats with an unloaded model: {requested_model}"
+    );
 }
 
 #[derive(Clone)]
-struct MockServer {
+struct LlamaState {
     requests: mpsc::Sender<CapturedRequest>,
-    models: RecordedModels,
-    load_requests: Arc<AtomicUsize>,
-    model_requests: Arc<AtomicUsize>,
+    available_models: Arc<Mutex<AvailableModels>>,
+    model_loads: Vec<(&'static str, String, String)>,
+    model_streams: Arc<Mutex<RecordedStreams>>,
 }
 
-async fn list_models(
-    State(server): State<MockServer>,
-) -> ([(header::HeaderName, &'static str); 1], &'static str) {
-    let response = match server.models {
-        RecordedModels::BothLoaded => include_str!("fixtures/llama-cpp/models/both-loaded.json"),
-        RecordedModels::QwenUnloaded if server.load_requests.load(Ordering::SeqCst) == 0 => {
-            include_str!("fixtures/llama-cpp/models/qwen-unloaded-lfm-loaded.json")
-        }
-        RecordedModels::QwenLoaded | RecordedModels::QwenUnloaded => {
-            include_str!("fixtures/llama-cpp/models/qwen-loaded.json")
-        }
-        RecordedModels::SecondLoaded => {
-            include_str!("fixtures/llama-cpp/models/minicpm-loaded.json")
-        }
-        RecordedModels::NoneRunning if server.load_requests.load(Ordering::SeqCst) == 0 => {
-            include_str!("fixtures/llama-cpp/models/both-unloaded.json")
-        }
-        RecordedModels::NoneRunning
-            if server.model_requests.fetch_add(1, Ordering::SeqCst) == 0 =>
-        {
-            include_str!("fixtures/llama-cpp/models/lfm3-loading.json")
-        }
-        RecordedModels::NoneRunning => include_str!("fixtures/llama-cpp/models/lfm3-loaded.json"),
-    };
-    ([(header::CONTENT_TYPE, "application/json")], response)
+async fn list_models(State(server): State<LlamaState>) -> Response {
+    let models_fixture = current_models(
+        &mut server
+            .available_models
+            .lock()
+            .expect("the mock server state is not poisoned"),
+    );
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
+        .body(Body::from(models_fixture))
+        .expect("the models fixture response is valid")
 }
 
 async fn load_model(
-    State(server): State<MockServer>,
+    State(server): State<LlamaState>,
     Json(body): Json<Value>,
 ) -> ([(header::HeaderName, &'static str); 1], &'static str) {
-    let model = match server.models {
-        RecordedModels::QwenUnloaded => "Qwen3.8-27B-UD-IQ4_XS",
-        _ => "LFM3-Omni-2B-Q4_K_M",
+    let requested_model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .expect("the load request names a model");
+    assert_eq!(body, json!({"model": requested_model}));
+    let (_, loading_models, loaded_models) = server
+        .model_loads
+        .iter()
+        .find(|(model, _, _)| *model == requested_model)
+        .unwrap_or_else(|| panic!("the application loads an unmocked model: {requested_model}"));
+    *server
+        .available_models
+        .lock()
+        .expect("the mock server state is not poisoned") = AvailableModels::Loading {
+        loading: loading_models.clone(),
+        loaded: loaded_models.clone(),
+        loading_served: false,
     };
-    assert_eq!(body, json!({"model": model}));
-    server.load_requests.fetch_add(1, Ordering::SeqCst);
     (
-        [(header::CONTENT_TYPE, "application/json")],
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
         include_str!("fixtures/llama-cpp/load-model/success.json"),
     )
 }
 
-async fn stream_response(State(server): State<MockServer>, Json(body): Json<Value>) -> Response {
-    if matches!(server.models, RecordedModels::NoneRunning) {
-        assert!(
-            server.load_requests.load(Ordering::SeqCst) > 0,
-            "the application loads the model before chatting"
-        );
-    }
-    let expected_model = match server.models {
-        RecordedModels::BothLoaded | RecordedModels::NoneRunning => "LFM3-Omni-2B-Q4_K_M",
-        RecordedModels::SecondLoaded => "MiniCPM5-2B-Q4_K_M",
-        RecordedModels::QwenLoaded | RecordedModels::QwenUnloaded => "Qwen3.8-27B-UD-IQ4_XS",
-    };
-    let requested_model = body.get("model").and_then(Value::as_str);
-    if requested_model.is_none() || requested_model == Some("") {
+async fn stream_response(State(server): State<LlamaState>, Json(body): Json<Value>) -> Response {
+    let requested_model = body.get("model").and_then(Value::as_str).map(str::to_owned);
+    if requested_model.is_none() || requested_model.as_deref() == Some("") {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
@@ -124,16 +219,37 @@ async fn stream_response(State(server): State<MockServer>, Json(body): Json<Valu
             )))
             .expect("the recorded error response is valid");
     }
-    assert_eq!(requested_model, Some(expected_model));
+    let requested_model = requested_model.expect("the chat request names a model");
+    let models_fixture = current_models(
+        &mut server
+            .available_models
+            .lock()
+            .expect("the mock server state is not poisoned"),
+    );
+    assert_loaded_model(&models_fixture, &requested_model);
+    let stream_fixture = server
+        .model_streams
+        .lock()
+        .expect("the mock server state is not poisoned")
+        .iter_mut()
+        .find(|(streamed_model, _)| *streamed_model == requested_model)
+        .and_then(|(_, streams)| streams.pop_front());
     let (response_chunks, receiver) = mpsc::channel::<String>(8);
+    let request_body = body.clone();
+    let captured_request = CapturedRequest {
+        response_chunks: response_chunks.clone(),
+        body,
+    };
     server
         .requests
-        .send(CapturedRequest {
-            body,
-            response_chunks,
-        })
+        .send(captured_request)
         .await
         .expect("the feature test receives model requests");
+    if let Some(stream_path) = stream_fixture {
+        tokio::spawn(async move {
+            stream_recorded_events(&response_chunks, &stream_path, &request_body).await;
+        });
+    }
     let stream = ReceiverStream::new(receiver).map(Ok::<_, Infallible>);
     let mut response = Response::new(Body::from_stream(stream));
     response.headers_mut().insert(
@@ -143,32 +259,54 @@ async fn stream_response(State(server): State<MockServer>, Json(body): Json<Valu
     response
 }
 
-pub async fn start_mock_server(
-    models: RecordedModels,
-) -> (String, mpsc::Receiver<CapturedRequest>) {
-    let (requests, receiver) = mpsc::channel(8);
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("the mock server binds to a local port");
-    let address = listener
-        .local_addr()
-        .expect("the mock server has a local address");
-    let router = Router::new()
-        .route("/v1/models", get(list_models))
-        .route("/models/load", post(load_model))
-        .route("/v1/chat/completions", post(stream_response))
-        .with_state(MockServer {
-            requests,
-            models,
-            load_requests: Arc::new(AtomicUsize::new(0)),
-            model_requests: Arc::new(AtomicUsize::new(0)),
-        });
-    tokio::spawn(async move {
-        axum::serve(listener, router)
+async fn stream_recorded_events(
+    response_chunks: &mpsc::Sender<String>,
+    stream_path: &str,
+    request_body: &Value,
+) {
+    let response = record_or_read_stream(stream_path, request_body).await;
+    let event_delay = Duration::from_millis(5);
+    let mut events = response.split("\n\n").peekable();
+    while let Some(event) = events.next() {
+        let mut recorded_event = event.to_owned();
+        if events.peek().is_some() {
+            recorded_event.push_str("\n\n");
+        }
+        if response_chunks.send(recorded_event).await.is_err() {
+            return;
+        }
+        tokio::time::sleep(event_delay).await;
+    }
+}
+
+async fn record_or_read_stream(stream_path: &str, request_body: &Value) -> String {
+    if std::env::var_os("SHODAN_RECORD_LLAMA").is_some() {
+        let address = std::env::var("SHODAN_LLAMA_ADDRESS")
+            .unwrap_or_else(|_| "http://127.0.0.1:8080".to_owned());
+        let client = reqwest::Client::new();
+        let response = client
+            .post(format!("{address}/v1/chat/completions"))
+            .json(request_body)
+            .send()
             .await
-            .expect("the mock server serves requests");
-    });
-    (format!("http://{address}"), receiver)
+            .expect("the running server accepts the request")
+            .error_for_status()
+            .expect("the running server accepts the conversation")
+            .text()
+            .await
+            .expect("the running server streams a response");
+        let fixture_path = std::path::Path::new(stream_path);
+        std::fs::create_dir_all(
+            fixture_path
+                .parent()
+                .expect("the fixture has a parent directory"),
+        )
+        .expect("the fixture directory can be created");
+        std::fs::write(fixture_path, &response).expect("the response can be recorded");
+        response
+    } else {
+        std::fs::read_to_string(stream_path).expect("the scenario has a recorded provider response")
+    }
 }
 
 pub async fn receive_request(requests: &mut mpsc::Receiver<CapturedRequest>) -> CapturedRequest {
@@ -330,6 +468,13 @@ pub fn run_test_application(server_address: String, width: u16, height: u16) -> 
 impl TestApplication {
     pub fn press_key(&self, code: KeyCode) {
         let key = KeyEvent::new(code, KeyModifiers::NONE);
+        self.events
+            .send(Ok(Event::Key(key)))
+            .expect("the application receives terminal input");
+    }
+
+    pub fn press_control_key(&self, character: char) {
+        let key = KeyEvent::new(KeyCode::Char(character), KeyModifiers::CONTROL);
         self.events
             .send(Ok(Event::Key(key)))
             .expect("the application receives terminal input");

@@ -3,8 +3,8 @@ use std::{fs, path::Path};
 use serde_json::Value;
 
 use super::super::support::{
-    CapturedRequest, RecordedModels, read_bottom_line, read_screen, receive_request_or_error,
-    run_test_application, send_response_bytes, start_mock_server,
+    CapturedRequest, RecordedLlama, read_bottom_line, read_screen, receive_request_or_error,
+    run_test_application, send_response_bytes,
 };
 
 pub(crate) async fn send_scenario_response(
@@ -66,8 +66,20 @@ pub async fn run_scenario(
     expected_exact_tool_result: Option<&str>,
     expected_responses: &[&str],
 ) {
-    let (address, mut requests) = start_mock_server(RecordedModels::QwenLoaded).await;
+    let (address, mut requests) = RecordedLlama::new()
+        .mock_available_models("tests/features/fixtures/llama-cpp/models/inkling-loaded.json")
+        .mock_model_load(
+            "Qwen3.8-27B-UD-IQ4_XS",
+            "tests/features/fixtures/llama-cpp/models/qwen-loading.json",
+            "tests/features/fixtures/llama-cpp/models/qwen-loaded.json",
+        )
+        .start()
+        .await;
     let mut application = run_test_application(address, 100, 30);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("Inkling-2-Mini-UD-IQ3_XXS"))
+        .await;
+    application.press_control_key(' ');
     application
         .wait_for_screen(|screen| read_bottom_line(screen).contains("Qwen3.8-27B-UD-IQ4_XS"))
         .await;

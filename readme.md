@@ -11,6 +11,7 @@ It uses switchable system prompts instead of skills. Users can choose the instru
 * [Architecture](doc/architecture.md)
 * [Boundaries](doc/boundaries.md)
 * [Chat](doc/features/chat.md)
+* [Run bash commands](doc/features/tools/bash.md)
 * [List directory](doc/features/tools/ls.md)
 * [Read file](doc/features/tools/read.md)
 * [Plan mode](doc/features/modes/plan.md)

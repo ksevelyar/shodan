@@ -22,12 +22,14 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     application::{Application, Statistics, abort_response},
     chats::{Message, ToolCall, send_message},
+    provider,
 };
 
 enum Palette {
     DarkGrey,
     Grey,
     ThinkingGrey,
+    Lavender,
     Pink,
 }
 
@@ -37,6 +39,7 @@ impl From<Palette> for Color {
             Palette::DarkGrey => Self::Rgb(55, 55, 55),
             Palette::Grey => Self::Gray,
             Palette::ThinkingGrey => Self::Rgb(128, 128, 128),
+            Palette::Lavender => Self::Rgb(84, 70, 125),
             Palette::Pink => Self::Rgb(255, 16, 240),
         }
     }
@@ -240,8 +243,8 @@ pub(crate) fn handle_input(
         }
         InterfaceInput::Mouse(mouse) => {
             match mouse.kind {
-                MouseEventKind::ScrollUp => scroll_up(application, 1),
-                MouseEventKind::ScrollDown => scroll_down(application, 1),
+                MouseEventKind::ScrollUp => scroll_up(application, 3),
+                MouseEventKind::ScrollDown => scroll_down(application, 3),
                 MouseEventKind::Down(MouseButton::Left) => begin_selection(application, mouse),
                 MouseEventKind::Drag(MouseButton::Left) => {
                     update_selection(application, mouse, true);
@@ -276,6 +279,15 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
             let input = std::mem::take(&mut application.input);
             send_message(application, input);
             application.scroll_from_bottom = 0;
+        }
+        KeyCode::Char(' ') if key.modifiers == KeyModifiers::CONTROL => {
+            let client = application.client.clone();
+            let address = application.server_address.clone();
+            let current_model = application.statistics.model.clone();
+            let event_sender = application.event_sender.clone();
+            tokio::spawn(async move {
+                provider::cycle_model(&client, &address, &current_model, &event_sender).await;
+            });
         }
         KeyCode::PageUp => scroll_up(application, 8),
         KeyCode::PageDown => scroll_down(application, 8),
@@ -459,7 +471,7 @@ fn format_model_message(
     for call in tool_calls {
         sections.push((
             format!("{} {}", call.name, call.arguments),
-            Style::default(),
+            Style::default().bg(Color::from(Palette::Lavender)),
         ));
     }
     if sections.is_empty() {
@@ -482,15 +494,20 @@ fn wrap_message_section(
             textwrap::wrap(line, width)
         };
         for wrapped_line in wrapped_lines {
-            if user {
+            let (line, line_style) = if user || style.bg.is_some() {
                 let padding = width.saturating_sub(wrapped_line.width());
-                lines.push(
-                    Line::from(format!("{wrapped_line}{}", " ".repeat(padding)))
-                        .style(Style::default().bg(Color::from(Palette::DarkGrey))),
-                );
+                (
+                    format!("{wrapped_line}{}", " ".repeat(padding)),
+                    if user {
+                        Style::default().bg(Color::from(Palette::DarkGrey))
+                    } else {
+                        style
+                    },
+                )
             } else {
-                lines.push(Line::from(wrapped_line.into_owned()).style(style));
-            }
+                (wrapped_line.into_owned(), style)
+            };
+            lines.push(Line::from(line).style(line_style));
         }
     }
     lines
@@ -523,7 +540,10 @@ pub(crate) fn draw_interface(
                 (vec![(content.clone(), Style::default())], false, false)
             }
             Message::ToolResult { content, .. } => (
-                vec![(format!("Result:\n{content}"), Style::default())],
+                vec![(
+                    format!("Result:\n{content}"),
+                    Style::default().bg(Color::from(Palette::Lavender)),
+                )],
                 false,
                 false,
             ),
