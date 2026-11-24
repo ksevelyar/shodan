@@ -19,7 +19,10 @@ async fn user_views_session_statistics() {
     assert_received_messages(
         &request,
         &[
-            ("system", "you are helpful assistent"),
+            (
+                "system",
+                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice. Add detail only when needed or requested.",
+            ),
             ("user", ASTEROIDS_PLAN_PROMPT),
         ],
     );
@@ -82,12 +85,11 @@ async fn user_views_response_time() {
         .await;
     let status = read_bottom_line(&screen);
     assert!(status.ends_with("llama.cpp LFM3-Omni-2B-Q4_K_M"));
-    assert!(status.contains(" ↑0 ↓0 CH0.0%"));
     let spinner = status
         .chars()
         .find(|character| ('⠁'..='⣿').contains(character))
         .expect("the status panel displays a spinner");
-    assert!(status.starts_with(spinner));
+    assert!(status.starts_with(&format!("{spinner} 0s ↑0 ↓0 CH0.0%")));
     application
         .wait_for_screen(|screen| {
             read_bottom_line(screen)
@@ -98,6 +100,9 @@ async fn user_views_response_time() {
 
     tokio::time::pause();
     tokio::time::advance(Duration::from_millis(5200)).await;
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains(" 5s ↑0 ↓0 CH0.0%"))
+        .await;
     send_recorded_response(&request).await;
     application
         .wait_for_screen(|screen| read_bottom_line(screen).starts_with("⏱ 5s ↑82 ↓383 CH0.0%"))
@@ -108,6 +113,9 @@ async fn user_views_response_time() {
     let request = receive_request(&mut requests).await;
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(72)).await;
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains(" 1m 12s ↑82 ↓383 CH0.0%"))
+        .await;
     send_recorded_response(&request).await;
     application
         .wait_for_screen(|screen| read_bottom_line(screen).starts_with("⏱ 1m 12s ↑164 ↓766 CH0.0%"))

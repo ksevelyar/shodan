@@ -4,6 +4,7 @@
 * A status panel appears on the bottom line of the console.
 * The left side displays the response indicator, sent tokens, received tokens, and cache hits.
 * The response indicator appears after the first message is sent, before the token statistics.
+* The response indicator shows elapsed time, updated every second while waiting.
 * The right side displays the provider and model name.
 * Cache hits are displayed as a percentage.
 
@@ -16,9 +17,11 @@
 
 ### 2. User views response time
 * User opens the application and sees `↑0 ↓0 CH0.0%` at the left of the bottom panel.
-* User sends a message and sees an animated spinner before the token statistics while waiting for the response.
+* User sends a message and sees an animated spinner and `0s` before the token statistics.
+* After 5 seconds, user sees the spinner and `5s` while waiting.
 * User receives the response after 5.2 seconds and sees `⏱ 5s ↑82 ↓383 CH0.0%`.
-* User sends another message and receives a response after 1 minute and 12 seconds.
+* User sends another message and sees the spinner and `1m 12s` while waiting.
+* User receives the response after 1 minute and 12 seconds.
 * User sees `⏱ 1m 12s ↑164 ↓766 CH0.0%`.
 
 ### 3. User scrolls the conversation
