@@ -3,7 +3,6 @@
 ## Requirements
 
 * User can chat with a local llama.cpp server in router mode.
-* Shodan selects the first loaded model at startup. If no model is loaded, Shodan loads and selects the first available model.
 * User sees the selected model name in the status panel before sending a message.
 
 ## User scenarios

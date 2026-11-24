@@ -1,6 +1,7 @@
 use crate::{
     chats::{Message, ToolCall},
     events::{Event, EventSender},
+    models::{self, AvailableModel, SelectedModel, ThinkingLevel},
     tools,
 };
 use eventsource_stream::{Event as ServerSentEvent, Eventsource};
@@ -63,17 +64,6 @@ struct ModelList {
     data: Vec<AvailableModel>,
 }
 
-#[derive(Deserialize)]
-struct AvailableModel {
-    id: String,
-    status: ModelStatus,
-}
-
-#[derive(Deserialize)]
-struct ModelStatus {
-    value: String,
-}
-
 async fn list_models(client: &reqwest::Client, address: &str) -> Result<ModelList, String> {
     client
         .get(format!("{address}/v1/models"))
@@ -90,19 +80,15 @@ async fn list_models(client: &reqwest::Client, address: &str) -> Result<ModelLis
 pub async fn select_model(client: &reqwest::Client, address: &str, event_sender: &EventSender) {
     let result = async {
         let models = list_models(client, address).await?;
-        if let Some(model) = models
-            .data
-            .iter()
-            .find(|model| model.status.value == "loaded")
-        {
-            return Ok(model.id.clone());
+        let (model, thinking_level) =
+            models::select_model(&models.data).ok_or_else(|| "no available models".to_owned())?;
+        let selected_model = SelectedModel {
+            name: model.id.clone(),
+            thinking_level,
+        };
+        if model.status.value == "loaded" {
+            return Ok(selected_model);
         }
-
-        let model = models
-            .data
-            .iter()
-            .find(|model| model.status.value == "unloaded")
-            .ok_or_else(|| "no available models".to_owned())?;
         client
             .post(format!("{address}/models/load"))
             .json(&serde_json::json!({"model": model.id}))
@@ -123,7 +109,7 @@ pub async fn select_model(client: &reqwest::Client, address: &str, event_sender:
                     .map(|candidate| candidate.status.value.as_str());
 
                 match status {
-                    Some("loaded") => return Ok(model.id.clone()),
+                    Some("loaded") => return Ok(selected_model),
                     Some("loading") | None => {
                         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                     }
@@ -146,12 +132,13 @@ pub async fn stream_response(
     client: &reqwest::Client,
     address: &str,
     model: &str,
+    thinking_level: Option<ThinkingLevel>,
     messages: &[Message],
     turn: u64,
     event_sender: &EventSender,
 ) {
     let result = async {
-        let events = post_messages(client, address, model, messages).await?;
+        let events = post_messages(client, address, model, thinking_level, messages).await?;
         read_provider_events(events, turn, event_sender).await
     }
     .await;
@@ -164,6 +151,7 @@ async fn post_messages(
     client: &reqwest::Client,
     address: &str,
     model: &str,
+    thinking_level: Option<ThinkingLevel>,
     messages: &[Message],
 ) -> Result<impl Stream<Item = Result<ServerSentEvent, String>> + Unpin, String> {
     let messages = messages
@@ -183,11 +171,18 @@ async fn post_messages(
             Message::ToolResult { call_id, content } => Some(serde_json::json!({"role":"tool", "tool_call_id":call_id, "content":content})),
         })
         .collect::<Vec<_>>();
+    let mut request = serde_json::json!({"model": model, "messages": messages, "tools": tools::describe_tools(), "stream": true, "stream_options": {"include_usage": true}});
+    if let Some(thinking_level) = thinking_level {
+        request["reasoning_effort"] = serde_json::json!(thinking_level.as_provider_value());
+    }
     let response = client
         .post(format!("{address}/v1/chat/completions"))
-        .json(&serde_json::json!({"model": model, "messages": messages, "tools": tools::describe_tools(), "stream": true, "stream_options": {"include_usage": true}}))
-        .send().await.map_err(|error| error.to_string())?
-        .error_for_status().map_err(|error| error.to_string())?;
+        .json(&request)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?;
 
     Ok(response
         .bytes_stream()

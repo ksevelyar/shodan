@@ -15,15 +15,8 @@ It uses switchable system prompts instead of skills. Users can choose the instru
 * [Read file](doc/features/tools/read.md)
 * [Plan mode](doc/features/modes/plan.md)
 * [llama.cpp provider](doc/features/providers/llama-cpp.md)
+* [Models](doc/features/models.md)
+* [Response recording](doc/features/responses-recording.md)
 * [Status panel](doc/features/status-panel.md)
 * [TUI](doc/tui.md)
 
-## Recording tool scenarios
-
-With the recorded model loaded on the local llama.cpp server, regenerate tool responses with:
-
-```sh
-SHODAN_RECORD_LLAMA=1 cargo test --test features features::tools:: -- --test-threads=1
-```
-
-Set `SHODAN_LLAMA_ADDRESS` to use a different server address.

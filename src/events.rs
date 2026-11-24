@@ -9,10 +9,11 @@ use crate::{
     application::Application,
     chats::{self, ToolCall},
     interface::{self, Interface},
+    models::SelectedModel,
 };
 
 pub enum Event {
-    ModelSelected(String),
+    ModelSelected(SelectedModel),
     MessageDelta {
         turn: u64,
         content: String,

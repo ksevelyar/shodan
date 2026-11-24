@@ -105,7 +105,10 @@ fn start_next_tool(application: &mut Application) {
 
 pub(crate) fn apply_event(application: &mut Application, event: Event) {
     match event {
-        Event::ModelSelected(model) => application.statistics.model = model,
+        Event::ModelSelected(model) => {
+            application.statistics.model = model.name;
+            application.statistics.thinking_level = model.thinking_level;
+        }
         Event::ModelSelectionFailed(error) => application.error = Some(error),
         Event::MessageDelta { turn, content }
             if turn == application.turn && application.statistics.response_started.is_some() =>

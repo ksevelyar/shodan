@@ -1,10 +1,41 @@
 use super::support::{
     ASTEROIDS_PLAN_PROMPT, RecordedModels, assert_received_messages, read_bottom_line,
-    read_history, receive_request, run_test_application, send_recorded_response, start_mock_server,
+    read_history, receive_request, run_test_application, send_recorded_response,
+    send_response_bytes, start_mock_server,
 };
 use std::time::Duration;
 
 use crossterm::event::KeyCode;
+
+#[tokio::test]
+async fn user_views_rounded_cache_hits() {
+    let (server_address, mut requests) = start_mock_server(RecordedModels::QwenLoaded).await;
+    let mut application = run_test_application(server_address, 120, 12);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("Qwen3.8-27B-UD-IQ4_XS"))
+        .await;
+    application.send_message("Hello");
+    let request = receive_request(&mut requests).await;
+    send_response_bytes(
+        &request,
+        include_str!("fixtures/llama-cpp/chat/qwen-hello-cached.txt"),
+    )
+    .await;
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("↑4 ↓31 CH95%"))
+        .await;
+}
+
+#[tokio::test]
+async fn user_views_thinking_level() {
+    let (server_address, _requests) = start_mock_server(RecordedModels::QwenLoaded).await;
+    let mut application = run_test_application(server_address, 120, 12);
+    application
+        .wait_for_screen(|screen| {
+            read_bottom_line(screen).ends_with("llama.cpp Qwen3.8-27B-UD-IQ4_XS low")
+        })
+        .await;
+}
 
 #[tokio::test]
 async fn user_views_session_statistics() {
@@ -28,7 +59,7 @@ async fn user_views_session_statistics() {
     );
     send_recorded_response(&request).await;
     let screen = application
-        .wait_for_screen(|screen| read_bottom_line(screen).contains("↑82 ↓383 CH0.0%"))
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("↑82 ↓383 CH0%"))
         .await;
 
     let status = read_bottom_line(&screen);
@@ -52,7 +83,7 @@ async fn user_scrolls_conversation() {
     let request = receive_request(&mut requests).await;
     send_recorded_response(&request).await;
     let screen = application
-        .wait_for_screen(|screen| read_bottom_line(screen).contains("↑82 ↓383 CH0.0%"))
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("↑82 ↓383 CH0%"))
         .await;
     let status = read_bottom_line(&screen);
 
@@ -71,7 +102,7 @@ async fn user_views_response_time() {
     application
         .wait_for_screen(|screen| {
             let status = read_bottom_line(screen);
-            status.starts_with("↑0 ↓0 CH0.0%") && status.contains("LFM3-Omni-2B-Q4_K_M")
+            status.starts_with("↑0 ↓0 CH0%") && status.contains("LFM3-Omni-2B-Q4_K_M")
         })
         .await;
     application.send_message(ASTEROIDS_PLAN_PROMPT);
@@ -89,7 +120,7 @@ async fn user_views_response_time() {
         .chars()
         .find(|character| ('⠁'..='⣿').contains(character))
         .expect("the status panel displays a spinner");
-    assert!(status.starts_with(&format!("{spinner} 0s ↑0 ↓0 CH0.0%")));
+    assert!(status.starts_with(&format!("{spinner} 0s ↑0 ↓0 CH0%")));
     application
         .wait_for_screen(|screen| {
             read_bottom_line(screen)
@@ -101,11 +132,11 @@ async fn user_views_response_time() {
     tokio::time::pause();
     tokio::time::advance(Duration::from_millis(5200)).await;
     application
-        .wait_for_screen(|screen| read_bottom_line(screen).contains(" 5s ↑0 ↓0 CH0.0%"))
+        .wait_for_screen(|screen| read_bottom_line(screen).contains(" 5s ↑0 ↓0 CH0%"))
         .await;
     send_recorded_response(&request).await;
     application
-        .wait_for_screen(|screen| read_bottom_line(screen).starts_with("⏱ 5s ↑82 ↓383 CH0.0%"))
+        .wait_for_screen(|screen| read_bottom_line(screen).starts_with("⏱ 5s ↑82 ↓383 CH0%"))
         .await;
     tokio::time::resume();
 
@@ -114,11 +145,11 @@ async fn user_views_response_time() {
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(72)).await;
     application
-        .wait_for_screen(|screen| read_bottom_line(screen).contains(" 1m 12s ↑82 ↓383 CH0.0%"))
+        .wait_for_screen(|screen| read_bottom_line(screen).contains(" 1m 12s ↑82 ↓383 CH0%"))
         .await;
     send_recorded_response(&request).await;
     application
-        .wait_for_screen(|screen| read_bottom_line(screen).starts_with("⏱ 1m 12s ↑164 ↓766 CH0.0%"))
+        .wait_for_screen(|screen| read_bottom_line(screen).starts_with("⏱ 1m 12s ↑164 ↓766 CH0%"))
         .await;
     tokio::time::resume();
 }
