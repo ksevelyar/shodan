@@ -47,6 +47,7 @@ pub enum RecordedModels {
     BothLoaded,
     NoneRunning,
     SecondLoaded,
+    QwenLoaded,
 }
 
 #[derive(Clone)]
@@ -62,6 +63,7 @@ async fn list_models(
 ) -> ([(header::HeaderName, &'static str); 1], &'static str) {
     let response = match server.models {
         RecordedModels::BothLoaded => include_str!("fixtures/llama-cpp/models/both-loaded.json"),
+        RecordedModels::QwenLoaded => include_str!("fixtures/llama-cpp/models/qwen-loaded.json"),
         RecordedModels::SecondLoaded => {
             include_str!("fixtures/llama-cpp/models/minicpm-loaded.json")
         }
@@ -100,6 +102,7 @@ async fn stream_response(State(server): State<MockServer>, Json(body): Json<Valu
     let expected_model = match server.models {
         RecordedModels::BothLoaded | RecordedModels::NoneRunning => "LFM3-Omni-2B-Q4_K_M",
         RecordedModels::SecondLoaded => "MiniCPM5-2B-Q4_K_M",
+        RecordedModels::QwenLoaded => "Qwen3.8-27B-UD-IQ4_XS",
     };
     let requested_model = body.get("model").and_then(Value::as_str);
     if requested_model.is_none() || requested_model == Some("") {
@@ -210,7 +213,7 @@ pub async fn wait_for_response_disconnect(request: &CapturedRequest) {
         .expect("the application disconnects from the response");
 }
 
-async fn send_response_bytes(request: &CapturedRequest, response: &str) {
+pub async fn send_response_bytes(request: &CapturedRequest, response: &str) {
     request
         .response_chunks
         .send(response.to_owned())
@@ -224,7 +227,7 @@ pub async fn receive_request_or_error(
 ) -> CapturedRequest {
     tokio::select! {
         request = receive_request(requests) => request,
-        screen = application.wait_for_screen(|screen| read_screen(screen).contains("Error:")) => {
+        screen = application.wait_for_screen(|screen| read_screen(screen).contains("Request failed:")) => {
             panic!("{}", read_screen(&screen));
         }
     }

@@ -6,9 +6,9 @@ use std::{
 
 use super::support::{
     ASTEROIDS_PLAN_PROMPT, RecordedModels, assert_received_messages, read_bottom_line,
-    read_history, read_screen, receive_request_or_error, run_test_application,
+    read_history, read_screen, receive_request, receive_request_or_error, run_test_application,
     send_initial_recorded_response, send_recorded_response, send_remaining_recorded_response,
-    start_mock_server, wait_for_response_disconnect,
+    send_response_bytes, start_mock_server, wait_for_response_disconnect,
 };
 use crossterm::event::{KeyCode, MouseEventKind};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -71,6 +71,116 @@ async fn user_aborts_model_response() {
     send_recorded_response(&second_request).await;
     application
         .wait_for_screen(|screen| read_screen(screen).contains("restart the game."))
+        .await;
+}
+
+#[tokio::test]
+async fn user_sees_failed_request() {
+    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let mut application = run_test_application(server_address, 80, 24);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
+        .await;
+    application.send_message(ASTEROIDS_PLAN_PROMPT);
+    let first_request = receive_request_or_error(&mut requests, &mut application).await;
+    send_initial_recorded_response(&first_request).await;
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("##"))
+        .await;
+    drop(first_request);
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("Request failed"))
+        .await;
+    application.send_message("Continue");
+    let second_request = receive_request(&mut requests).await;
+    assert_received_messages(
+        &second_request,
+        &[
+            ("system", "you are helpful assistent"),
+            ("user", ASTEROIDS_PLAN_PROMPT),
+            ("user", "Continue"),
+        ],
+    );
+    send_recorded_response(&second_request).await;
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("restart the game."))
+        .await;
+}
+
+#[tokio::test]
+async fn user_aborts_tool_call_response() {
+    let (server_address, mut requests) = start_mock_server(RecordedModels::QwenLoaded).await;
+    let mut application = run_test_application(server_address, 100, 30);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("Qwen3.8-27B-UD-IQ4_XS"))
+        .await;
+    let prompt = "List all entries in tests/features/fixtures/tools/user_lists_directory, including hidden entries, using the ls tool. Show the exact listing.";
+    application.send_message(prompt);
+    let first_request = receive_request_or_error(&mut requests, &mut application).await;
+    let response = include_str!("fixtures/llama-cpp/tools/user_lists_directory/response-1.txt");
+    let call_start = response
+        .find("\"tool_calls\"")
+        .expect("the recorded response contains a tool call");
+    let call_end = response[call_start..]
+        .find("\n\n")
+        .expect("the recorded tool call chunk ends")
+        + call_start
+        + 2;
+    send_response_bytes(&first_request, &response[..call_end]).await;
+    application.press_key(KeyCode::Esc);
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("Request was aborted"))
+        .await;
+    wait_for_response_disconnect(&first_request).await;
+    let next_prompt = "Ignore the previous request. Say hello.";
+    application.send_message(next_prompt);
+    let second_request = receive_request_or_error(&mut requests, &mut application).await;
+    assert_received_messages(
+        &second_request,
+        &[
+            ("system", "you are helpful assistent"),
+            ("user", prompt),
+            ("user", next_prompt),
+        ],
+    );
+    super::tools::support::send_scenario_response(
+        &second_request,
+        "user_aborts_tool_call_response",
+        2,
+    )
+    .await;
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("Hello"))
+        .await;
+}
+
+#[tokio::test]
+async fn user_watches_model_thinking() {
+    let (server_address, mut requests) = start_mock_server(RecordedModels::QwenLoaded).await;
+    let mut application = run_test_application(server_address, 100, 30);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("Qwen3.8-27B-UD-IQ4_XS"))
+        .await;
+    application.send_message("Read tests/features/fixtures/tools/user_reads_file/greeting.txt using the read tool and show its exact contents.");
+    let first_request = receive_request_or_error(&mut requests, &mut application).await;
+    let response = include_str!("fixtures/llama-cpp/tools/user_reads_file/response-1.txt");
+    let thinking_end = response
+        .find("\"reasoning_content\":\" asking\"")
+        .expect("the recorded response contains the model's thinking");
+    let thinking_end = thinking_end
+        + response[thinking_end..]
+            .find("\n\n")
+            .expect("the recorded thinking chunk ends")
+        + 2;
+    send_response_bytes(&first_request, &response[..thinking_end]).await;
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("The user is asking"))
+        .await;
+    send_response_bytes(&first_request, &response[thinking_end..]).await;
+    let second_request = receive_request_or_error(&mut requests, &mut application).await;
+    super::tools::support::send_scenario_response(&second_request, "user_reads_file", 2).await;
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("Hello, Shodan!"))
         .await;
 }
 

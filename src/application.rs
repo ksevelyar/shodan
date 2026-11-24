@@ -7,12 +7,13 @@ use tokio::{sync::mpsc, time::Instant};
 
 use crate::{
     chats::{self, Message, build_chat},
+    events::{self, EventSender},
     interface::{self, build_interface},
-    provider::{self, ProviderEvent},
+    provider,
 };
 
 pub use crate::{
-    chats::ChatUpdates,
+    events::Events,
     interface::{Interface, TerminalMode},
 };
 
@@ -35,8 +36,11 @@ pub struct Application {
     pub(crate) messages: Vec<Message>,
     pub(crate) statistics: Statistics,
     pub(crate) error: Option<String>,
-    pub(crate) provider_events: mpsc::UnboundedSender<ProviderEvent>,
+    pub(crate) event_sender: EventSender,
     pub(crate) active_request: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) turn: u64,
+    pub(crate) turn_start: usize,
+    pub(crate) pending_tool_calls: std::collections::VecDeque<crate::chats::ToolCall>,
 }
 
 #[doc = "# Errors\nReturns an error if the terminal cannot be initialized."]
@@ -45,15 +49,12 @@ pub fn build_application<BackendType: Backend, EventSource>(
     backend: BackendType,
     events: EventSource,
     terminal_mode: TerminalMode,
-) -> io::Result<(
-    Application,
-    Interface<BackendType, EventSource>,
-    ChatUpdates,
-)>
+) -> io::Result<(Application, Interface<BackendType, EventSource>, Events)>
 where
     BackendType::Error: Send + Sync + 'static,
 {
-    let (messages, provider_events, updates) = build_chat();
+    let messages = build_chat();
+    let (event_sender, background_events) = mpsc::unbounded_channel();
     let interface = build_interface(backend, events, terminal_mode)?;
     let application = Application {
         server_address,
@@ -61,20 +62,23 @@ where
         messages,
         statistics: Statistics::default(),
         error: None,
-        provider_events,
+        event_sender,
         active_request: None,
+        turn: 0,
+        turn_start: 0,
+        pending_tool_calls: std::collections::VecDeque::new(),
         input: String::new(),
         scroll_from_bottom: 0,
         maximum_scroll: 0,
     };
-    Ok((application, interface, updates))
+    Ok((application, interface, background_events))
 }
 
 #[doc = "# Errors\nReturns an error if terminal input or rendering fails."]
 pub async fn run_application<BackendType, EventSource>(
     mut application: Application,
     mut interface: Interface<BackendType, EventSource>,
-    mut updates: ChatUpdates,
+    mut background_events: Events,
 ) -> io::Result<()>
 where
     BackendType: Backend,
@@ -83,11 +87,12 @@ where
 {
     let client = application.client.clone();
     let address = application.server_address.clone();
-    let updates_sender = application.provider_events.clone();
+    let event_sender = application.event_sender.clone();
     tokio::spawn(async move {
-        crate::provider::select_model(&client, &address, &updates_sender).await;
+        crate::provider::select_model(&client, &address, &event_sender).await;
     });
-    let result = run_event_loop(&mut application, &mut interface, &mut updates).await;
+    let result =
+        events::run_event_loop(&mut application, &mut interface, &mut background_events).await;
     if let Some(request) = application.active_request.take() {
         request.abort();
     }
@@ -99,9 +104,10 @@ pub(crate) fn start_response(application: &mut Application, messages: Vec<Messag
     let client = application.client.clone();
     let address = application.server_address.clone();
     let model = application.statistics.model.clone();
-    let provider_events = application.provider_events.clone();
+    let event_sender = application.event_sender.clone();
+    let turn = application.turn;
     application.active_request = Some(tokio::spawn(async move {
-        provider::stream_response(&client, &address, &model, &messages, &provider_events).await;
+        provider::stream_response(&client, &address, &model, &messages, turn, &event_sender).await;
     }));
 }
 
@@ -110,32 +116,8 @@ pub(crate) fn abort_response(application: &mut Application) {
         return;
     };
     request.abort();
+    application.turn = application.turn.wrapping_add(1);
+    application.pending_tool_calls.clear();
     application.statistics.response_started = None;
     chats::mark_response_aborted(application);
-}
-
-async fn run_event_loop<BackendType, EventSource>(
-    application: &mut Application,
-    interface: &mut Interface<BackendType, EventSource>,
-    updates: &mut ChatUpdates,
-) -> io::Result<()>
-where
-    BackendType: Backend,
-    BackendType::Error: Send + Sync + 'static,
-    EventSource: Stream<Item = io::Result<Event>> + Unpin,
-{
-    loop {
-        interface::draw(interface, application)?;
-        tokio::select! {
-            input = interface::wait_for_input(interface) => {
-                if interface::handle_input(application, input?).is_break() {
-                    return Ok(());
-                }
-            }
-            update = chats::wait_for_update(updates) => {
-                chats::apply_update(application, update?);
-            }
-            () = tokio::time::sleep(Duration::from_millis(80)), if application.statistics.response_started.is_some() => {}
-        }
-    }
 }
