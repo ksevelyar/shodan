@@ -597,7 +597,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, statistics: &Statistics) {
         .prompt_tokens
         .saturating_sub(statistics.cached_tokens);
     let prompt_tokens = u128::from(statistics.prompt_tokens);
-    let cache_tenths = (u128::from(statistics.cached_tokens) * 1000 + prompt_tokens / 2)
+    let cache_percentage = (u128::from(statistics.cached_tokens) * 100 + prompt_tokens / 2)
         .checked_div(prompt_tokens)
         .unwrap_or(0);
     let response_status = if let Some(started) = statistics.response_started {
@@ -619,13 +619,14 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, statistics: &Statistics) {
     };
     let response_prefix = response_status.map_or_else(String::new, |status| format!("{status} "));
     let left = format!(
-        "{response_prefix}↑{} ↓{} CH{}.{}%",
+        "{response_prefix}↑{} ↓{} CH{cache_percentage}%",
         format_count(sent),
-        format_count(statistics.completion_tokens),
-        cache_tenths / 10,
-        cache_tenths % 10
+        format_count(statistics.completion_tokens)
     );
-    let right = format!("llama.cpp {}", statistics.model);
+    let thinking_level = statistics.thinking_level.map_or_else(String::new, |level| {
+        format!(" {}", level.as_provider_value())
+    });
+    let right = format!("llama.cpp {}{thinking_level}", statistics.model);
     let right_width = u16::try_from(right.width()).unwrap_or(u16::MAX);
     let status_areas =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(right_width)]).split(area);

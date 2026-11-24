@@ -48,6 +48,7 @@ pub enum RecordedModels {
     NoneRunning,
     SecondLoaded,
     QwenLoaded,
+    QwenUnloaded,
 }
 
 #[derive(Clone)]
@@ -63,7 +64,12 @@ async fn list_models(
 ) -> ([(header::HeaderName, &'static str); 1], &'static str) {
     let response = match server.models {
         RecordedModels::BothLoaded => include_str!("fixtures/llama-cpp/models/both-loaded.json"),
-        RecordedModels::QwenLoaded => include_str!("fixtures/llama-cpp/models/qwen-loaded.json"),
+        RecordedModels::QwenUnloaded if server.load_requests.load(Ordering::SeqCst) == 0 => {
+            include_str!("fixtures/llama-cpp/models/qwen-unloaded-lfm-loaded.json")
+        }
+        RecordedModels::QwenLoaded | RecordedModels::QwenUnloaded => {
+            include_str!("fixtures/llama-cpp/models/qwen-loaded.json")
+        }
         RecordedModels::SecondLoaded => {
             include_str!("fixtures/llama-cpp/models/minicpm-loaded.json")
         }
@@ -84,7 +90,11 @@ async fn load_model(
     State(server): State<MockServer>,
     Json(body): Json<Value>,
 ) -> ([(header::HeaderName, &'static str); 1], &'static str) {
-    assert_eq!(body, json!({"model": "LFM3-Omni-2B-Q4_K_M"}));
+    let model = match server.models {
+        RecordedModels::QwenUnloaded => "Qwen3.8-27B-UD-IQ4_XS",
+        _ => "LFM3-Omni-2B-Q4_K_M",
+    };
+    assert_eq!(body, json!({"model": model}));
     server.load_requests.fetch_add(1, Ordering::SeqCst);
     (
         [(header::CONTENT_TYPE, "application/json")],
@@ -102,7 +112,7 @@ async fn stream_response(State(server): State<MockServer>, Json(body): Json<Valu
     let expected_model = match server.models {
         RecordedModels::BothLoaded | RecordedModels::NoneRunning => "LFM3-Omni-2B-Q4_K_M",
         RecordedModels::SecondLoaded => "MiniCPM5-2B-Q4_K_M",
-        RecordedModels::QwenLoaded => "Qwen3.8-27B-UD-IQ4_XS",
+        RecordedModels::QwenLoaded | RecordedModels::QwenUnloaded => "Qwen3.8-27B-UD-IQ4_XS",
     };
     let requested_model = body.get("model").and_then(Value::as_str);
     if requested_model.is_none() || requested_model == Some("") {

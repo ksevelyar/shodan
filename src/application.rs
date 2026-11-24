@@ -9,6 +9,7 @@ use crate::{
     chats::{self, Message, build_chat},
     events::{self, EventSender},
     interface::{self, build_interface},
+    models::ThinkingLevel,
     provider,
 };
 
@@ -23,6 +24,7 @@ pub(crate) struct Statistics {
     pub cached_tokens: u64,
     pub completion_tokens: u64,
     pub model: String,
+    pub thinking_level: Option<ThinkingLevel>,
     pub response_time: Option<Duration>,
     pub response_started: Option<Instant>,
 }
@@ -108,10 +110,20 @@ pub(crate) fn start_response(application: &mut Application, messages: Vec<Messag
     let client = application.client.clone();
     let address = application.server_address.clone();
     let model = application.statistics.model.clone();
+    let thinking_level = application.statistics.thinking_level;
     let event_sender = application.event_sender.clone();
     let turn = application.turn;
     application.active_request = Some(tokio::spawn(async move {
-        provider::stream_response(&client, &address, &model, &messages, turn, &event_sender).await;
+        provider::stream_response(
+            &client,
+            &address,
+            &model,
+            thinking_level,
+            &messages,
+            turn,
+            &event_sender,
+        )
+        .await;
     }));
 }
 
