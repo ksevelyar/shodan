@@ -1,7 +1,6 @@
 use super::support::{
-    ASTEROIDS_PLAN_PROMPT, RecordedModels, assert_received_messages, read_bottom_line,
-    read_history, receive_request, run_test_application, send_recorded_response,
-    send_response_bytes, start_mock_server,
+    ASTEROIDS_PLAN_PROMPT, RecordedLlama, assert_received_messages, read_bottom_line, read_history,
+    receive_request, run_test_application, send_recorded_response, send_response_bytes,
 };
 use std::time::Duration;
 
@@ -9,8 +8,20 @@ use crossterm::event::KeyCode;
 
 #[tokio::test]
 async fn user_views_rounded_cache_hits() {
-    let (server_address, mut requests) = start_mock_server(RecordedModels::QwenLoaded).await;
+    let (server_address, mut requests) = RecordedLlama::new()
+        .mock_available_models("tests/features/fixtures/llama-cpp/models/inkling-loaded.json")
+        .mock_model_load(
+            "Qwen3.8-27B-UD-IQ4_XS",
+            "tests/features/fixtures/llama-cpp/models/qwen-loading.json",
+            "tests/features/fixtures/llama-cpp/models/qwen-loaded.json",
+        )
+        .start()
+        .await;
     let mut application = run_test_application(server_address, 120, 12);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("Inkling-2-Mini-UD-IQ3_XXS"))
+        .await;
+    application.press_control_key(' ');
     application
         .wait_for_screen(|screen| read_bottom_line(screen).contains("Qwen3.8-27B-UD-IQ4_XS"))
         .await;
@@ -28,18 +39,31 @@ async fn user_views_rounded_cache_hits() {
 
 #[tokio::test]
 async fn user_views_thinking_level() {
-    let (server_address, _requests) = start_mock_server(RecordedModels::QwenLoaded).await;
+    let (server_address, _requests) = RecordedLlama::new()
+        .mock_available_models("tests/features/fixtures/llama-cpp/models/inkling-loaded.json")
+        .mock_model_load(
+            "Qwen3.8-27B-UD-IQ4_XS",
+            "tests/features/fixtures/llama-cpp/models/qwen-loading.json",
+            "tests/features/fixtures/llama-cpp/models/qwen-loaded.json",
+        )
+        .start()
+        .await;
     let mut application = run_test_application(server_address, 120, 12);
     application
         .wait_for_screen(|screen| {
-            read_bottom_line(screen).ends_with("llama.cpp Qwen3.8-27B-UD-IQ4_XS low")
+            read_bottom_line(screen).ends_with("llama.cpp Inkling-2-Mini-UD-IQ3_XXS low")
         })
         .await;
 }
 
 #[tokio::test]
 async fn user_views_session_statistics() {
-    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let (server_address, mut requests) = RecordedLlama::new()
+        .mock_available_models(
+            "tests/features/fixtures/llama-cpp/models/lfm3-and-minicpm-loaded.json",
+        )
+        .start()
+        .await;
     let mut application = run_test_application(server_address, 120, 12);
 
     application
@@ -52,7 +76,7 @@ async fn user_views_session_statistics() {
         &[
             (
                 "system",
-                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice. Add detail only when needed or requested.",
+                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice.",
             ),
             ("user", ASTEROIDS_PLAN_PROMPT),
         ],
@@ -73,7 +97,12 @@ async fn user_views_session_statistics() {
 
 #[tokio::test]
 async fn user_scrolls_conversation() {
-    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let (server_address, mut requests) = RecordedLlama::new()
+        .mock_available_models(
+            "tests/features/fixtures/llama-cpp/models/lfm3-and-minicpm-loaded.json",
+        )
+        .start()
+        .await;
     let mut application = run_test_application(server_address, 120, 12);
 
     application
@@ -96,7 +125,12 @@ async fn user_scrolls_conversation() {
 
 #[tokio::test]
 async fn user_views_response_time() {
-    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let (server_address, mut requests) = RecordedLlama::new()
+        .mock_available_models(
+            "tests/features/fixtures/llama-cpp/models/lfm3-and-minicpm-loaded.json",
+        )
+        .start()
+        .await;
     let mut application = run_test_application(server_address, 120, 12);
 
     application
