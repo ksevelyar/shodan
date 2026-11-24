@@ -33,7 +33,7 @@ pub(crate) enum Message {
 }
 
 pub(crate) fn build_chat() -> Vec<Message> {
-    vec![Message::System("you are helpful assistent".to_owned())]
+    vec![Message::System("Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice. Add detail only when needed or requested.".to_owned())]
 }
 
 fn append_model_message(application: &mut Application) {

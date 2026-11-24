@@ -63,7 +63,10 @@ async fn user_aborts_model_response() {
     assert_received_messages(
         &second_request,
         &[
-            ("system", "you are helpful assistent"),
+            (
+                "system",
+                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice. Add detail only when needed or requested.",
+            ),
             ("user", ASTEROIDS_PLAN_PROMPT),
             ("user", "Continue"),
         ],
@@ -96,7 +99,10 @@ async fn user_sees_failed_request() {
     assert_received_messages(
         &second_request,
         &[
-            ("system", "you are helpful assistent"),
+            (
+                "system",
+                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice. Add detail only when needed or requested.",
+            ),
             ("user", ASTEROIDS_PLAN_PROMPT),
             ("user", "Continue"),
         ],
@@ -138,7 +144,10 @@ async fn user_aborts_tool_call_response() {
     assert_received_messages(
         &second_request,
         &[
-            ("system", "you are helpful assistent"),
+            (
+                "system",
+                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice. Add detail only when needed or requested.",
+            ),
             ("user", prompt),
             ("user", next_prompt),
         ],
@@ -173,9 +182,23 @@ async fn user_watches_model_thinking() {
             .expect("the recorded thinking chunk ends")
         + 2;
     send_response_bytes(&first_request, &response[..thinking_end]).await;
-    application
+    let screen = application
         .wait_for_screen(|screen| read_history(screen).contains("The user is asking"))
         .await;
+    for text in ["Thinking:", "The user is asking"] {
+        let row = (0..screen.area.height - 4)
+            .find(|&row| {
+                let line = (0..screen.area.width)
+                    .map(|column| screen[(column, row)].symbol())
+                    .collect::<String>();
+                line.starts_with(text)
+            })
+            .expect("the thinking is visible");
+        for column in 0..text.len() {
+            let column = u16::try_from(column).expect("the thinking fits in the terminal");
+            assert_eq!(screen[(column, row)].fg, Color::Rgb(128, 128, 128));
+        }
+    }
     send_response_bytes(&first_request, &response[thinking_end..]).await;
     let second_request = receive_request_or_error(&mut requests, &mut application).await;
     super::tools::support::send_scenario_response(&second_request, "user_reads_file", 2).await;
@@ -333,7 +356,10 @@ async fn user_starts_session_and_scrolls_through_long_response() {
     assert_received_messages(
         &request,
         &[
-            ("system", "you are helpful assistent"),
+            (
+                "system",
+                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice. Add detail only when needed or requested.",
+            ),
             ("user", ASTEROIDS_PLAN_PROMPT),
         ],
     );

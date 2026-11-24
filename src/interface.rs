@@ -27,6 +27,7 @@ use crate::{
 enum Palette {
     DarkGrey,
     Grey,
+    ThinkingGrey,
     Pink,
 }
 
@@ -35,6 +36,7 @@ impl From<Palette> for Color {
         match color {
             Palette::DarkGrey => Self::Rgb(55, 55, 55),
             Palette::Grey => Self::Gray,
+            Palette::ThinkingGrey => Self::Rgb(128, 128, 128),
             Palette::Pink => Self::Rgb(255, 16, 240),
         }
     }
@@ -257,18 +259,59 @@ fn scroll_down(application: &mut Application, lines: usize) {
         .saturating_sub(lines);
 }
 
-fn format_model_message(content: &str, thinking: &str, tool_calls: &[ToolCall]) -> String {
+fn format_model_message(
+    content: &str,
+    thinking: &str,
+    tool_calls: &[ToolCall],
+) -> Vec<(String, Style)> {
     let mut sections = Vec::new();
     if !thinking.is_empty() {
-        sections.push(format!("Thinking:\n{thinking}"));
+        sections.push((
+            format!("Thinking:\n{thinking}"),
+            Style::default().fg(Color::from(Palette::ThinkingGrey)),
+        ));
     }
     if !content.is_empty() {
-        sections.push(content.to_owned());
+        sections.push((content.to_owned(), Style::default()));
     }
     for call in tool_calls {
-        sections.push(format!("{} {}", call.name, call.arguments));
+        sections.push((
+            format!("{} {}", call.name, call.arguments),
+            Style::default(),
+        ));
     }
-    sections.join("\n")
+    if sections.is_empty() {
+        sections.push((String::new(), Style::default()));
+    }
+    sections
+}
+
+fn wrap_message_section(
+    content: &str,
+    style: Style,
+    user: bool,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for line in content.split('\n') {
+        let wrapped_lines = if line.is_empty() {
+            vec![std::borrow::Cow::Borrowed("")]
+        } else {
+            textwrap::wrap(line, width)
+        };
+        for wrapped_line in wrapped_lines {
+            if user {
+                let padding = width.saturating_sub(wrapped_line.width());
+                lines.push(
+                    Line::from(format!("{wrapped_line}{}", " ".repeat(padding)))
+                        .style(Style::default().bg(Color::from(Palette::DarkGrey))),
+                );
+            } else {
+                lines.push(Line::from(wrapped_line.into_owned()).style(style));
+            }
+        }
+    }
+    lines
 }
 
 pub(crate) fn draw_interface(
@@ -291,11 +334,17 @@ pub(crate) fn draw_interface(
     let width = usize::from(areas[0].width).max(1);
     let mut lines = Vec::new();
     for message in messages {
-        let (content, user, aborted) = match message {
+        let (sections, user, aborted) = match message {
             Message::System(_) => continue,
-            Message::User(content) => (content.clone(), true, false),
-            Message::FailedResponse(content) => (content.clone(), false, false),
-            Message::ToolResult { content, .. } => (format!("Result:\n{content}"), false, false),
+            Message::User(content) => (vec![(content.clone(), Style::default())], true, false),
+            Message::FailedResponse(content) => {
+                (vec![(content.clone(), Style::default())], false, false)
+            }
+            Message::ToolResult { content, .. } => (
+                vec![(format!("Result:\n{content}"), Style::default())],
+                false,
+                false,
+            ),
             Message::Model {
                 content,
                 thinking,
@@ -307,23 +356,8 @@ pub(crate) fn draw_interface(
                 *aborted,
             ),
         };
-        for line in content.split('\n') {
-            let wrapped_lines = if line.is_empty() {
-                vec![std::borrow::Cow::Borrowed("")]
-            } else {
-                textwrap::wrap(line, width)
-            };
-            for wrapped_line in wrapped_lines {
-                if user {
-                    let padding = width.saturating_sub(wrapped_line.width());
-                    lines.push(
-                        Line::from(format!("{wrapped_line}{}", " ".repeat(padding)))
-                            .style(Style::default().bg(Color::from(Palette::DarkGrey))),
-                    );
-                } else {
-                    lines.push(Line::from(wrapped_line.into_owned()));
-                }
-            }
+        for (content, style) in sections {
+            lines.extend(wrap_message_section(&content, style, user, width));
         }
         if aborted {
             for line in textwrap::wrap("Request was aborted", width) {
@@ -391,19 +425,15 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, statistics: &Statistics) {
         let frame_index =
             usize::try_from(started.elapsed().as_millis() / frame_duration % frame_count)
                 .expect("the spinner frame index fits in usize");
-        Some(spinner_frames[frame_index].to_string())
+        Some(format!(
+            "{} {}",
+            spinner_frames[frame_index],
+            format_response_time(started.elapsed())
+        ))
     } else {
-        statistics.response_time.map(|duration| {
-            let seconds = duration.as_secs();
-            let seconds_per_minute = 60;
-            if seconds < seconds_per_minute {
-                format!("⏱ {seconds}s")
-            } else {
-                let minutes = seconds / seconds_per_minute;
-                let remaining_seconds = seconds % seconds_per_minute;
-                format!("⏱ {minutes}m {remaining_seconds}s")
-            }
-        })
+        statistics
+            .response_time
+            .map(|duration| format!("⏱ {}", format_response_time(duration)))
     };
     let response_prefix = response_status.map_or_else(String::new, |status| format!("{status} "));
     let left = format!(
@@ -419,6 +449,18 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, statistics: &Statistics) {
         Layout::horizontal([Constraint::Min(0), Constraint::Length(right_width)]).split(area);
     frame.render_widget(Paragraph::new(left), status_areas[0]);
     frame.render_widget(Paragraph::new(right), status_areas[1]);
+}
+
+fn format_response_time(duration: std::time::Duration) -> String {
+    let seconds = duration.as_secs();
+    let seconds_per_minute = 60;
+    if seconds < seconds_per_minute {
+        format!("{seconds}s")
+    } else {
+        let minutes = seconds / seconds_per_minute;
+        let remaining_seconds = seconds % seconds_per_minute;
+        format!("{minutes}m {remaining_seconds}s")
+    }
 }
 
 fn format_count(count: u64) -> String {
