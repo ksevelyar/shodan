@@ -10,9 +10,9 @@ use super::support::{
     send_initial_recorded_response, send_recorded_response, send_remaining_recorded_response,
     send_response_bytes, start_mock_server, wait_for_response_disconnect,
 };
-use crossterm::event::{KeyCode, MouseEventKind};
+use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier};
 
 #[tokio::test]
 async fn user_aborts_model_response() {
@@ -205,6 +205,106 @@ async fn user_watches_model_thinking() {
     application
         .wait_for_screen(|screen| read_history(screen).contains("Hello, Shodan!"))
         .await;
+}
+
+#[tokio::test]
+async fn user_selects_visible_text() {
+    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let mut application = run_test_application(server_address, 80, 12);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
+        .await;
+    application.send_message(ASTEROIDS_PLAN_PROMPT);
+    let request = receive_request(&mut requests).await;
+    send_recorded_response(&request).await;
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("restart the game."))
+        .await;
+    application.enter_text("message");
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("message"))
+        .await;
+
+    application.scroll_mouse(MouseEventKind::Down(MouseButton::Left), 2, 0);
+    application.scroll_mouse(MouseEventKind::Drag(MouseButton::Left), 5, 11);
+    application.scroll_mouse(MouseEventKind::Up(MouseButton::Left), 5, 11);
+    application
+        .wait_for_screen(|screen| {
+            [(2, 0), (0, 8), (0, 9), (0, 10), (5, 11)]
+                .iter()
+                .all(|position| screen[*position].modifier.contains(Modifier::REVERSED))
+        })
+        .await;
+
+    application.scroll_mouse(MouseEventKind::Down(MouseButton::Left), 7, 9);
+    application.scroll_mouse(MouseEventKind::Drag(MouseButton::Left), 1, 9);
+    application.scroll_mouse(MouseEventKind::Up(MouseButton::Left), 1, 9);
+    application
+        .wait_for_screen(|screen| {
+            screen[(1, 9)].modifier.contains(Modifier::REVERSED)
+                && screen[(7, 9)].modifier.contains(Modifier::REVERSED)
+                && !screen[(2, 0)].modifier.contains(Modifier::REVERSED)
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn user_scrolls_with_conversation_selection() {
+    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let mut application = run_test_application(server_address, 80, 12);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
+        .await;
+    application.send_message(ASTEROIDS_PLAN_PROMPT);
+    let request = receive_request(&mut requests).await;
+    send_recorded_response(&request).await;
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen).contains("restart the game."))
+        .await;
+    let original_history = read_history(&screen);
+    application.scroll_mouse(MouseEventKind::Down(MouseButton::Left), 0, 2);
+    application.scroll_mouse(MouseEventKind::Drag(MouseButton::Left), 4, 2);
+    application.scroll_mouse(MouseEventKind::Up(MouseButton::Left), 4, 2);
+    application
+        .wait_for_screen(|screen| screen[(0, 2)].modifier.contains(Modifier::REVERSED))
+        .await;
+    application.scroll_mouse(MouseEventKind::ScrollUp, 0, 9);
+    application
+        .wait_for_screen(|screen| read_history(screen) != original_history)
+        .await;
+    application.scroll_mouse(MouseEventKind::ScrollDown, 0, 9);
+    application
+        .wait_for_screen(|screen| {
+            read_history(screen) == original_history
+                && screen[(0, 2)].modifier.contains(Modifier::REVERSED)
+                && screen[(4, 2)].modifier.contains(Modifier::REVERSED)
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn user_extends_selection_beyond_visible_conversation() {
+    let (server_address, mut requests) = start_mock_server(RecordedModels::BothLoaded).await;
+    let mut application = run_test_application(server_address, 80, 12);
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
+        .await;
+    application.send_message(ASTEROIDS_PLAN_PROMPT);
+    let request = receive_request(&mut requests).await;
+    send_recorded_response(&request).await;
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen).contains("restart the game."))
+        .await;
+    let original_history = read_history(&screen);
+    application.scroll_mouse(MouseEventKind::Down(MouseButton::Left), 2, 3);
+    application.scroll_mouse(MouseEventKind::Drag(MouseButton::Left), 2, 0);
+    application
+        .wait_for_screen(|screen| {
+            read_history(screen) != original_history
+                && screen[(2, 0)].modifier.contains(Modifier::REVERSED)
+        })
+        .await;
+    application.scroll_mouse(MouseEventKind::Up(MouseButton::Left), 2, 0);
 }
 
 #[tokio::test]

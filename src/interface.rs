@@ -3,7 +3,7 @@ use std::{io, ops::ControlFlow};
 use crossterm::{
     event::{
         DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-        KeyModifiers, MouseEventKind,
+        KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -13,7 +13,7 @@ use ratatui::{
     Frame, Terminal,
     backend::Backend,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::Line,
     widgets::Paragraph,
 };
@@ -142,6 +142,26 @@ pub(crate) fn restore_terminal<BackendType: Backend, EventSource>(
         .map_or(Ok(()), TerminalSession::restore)
 }
 
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+enum SelectionRow {
+    Conversation(usize),
+    Panel(u16),
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+struct SelectionPosition {
+    row: SelectionRow,
+    column: u16,
+}
+
+pub(crate) struct ScreenSelection {
+    anchor: SelectionPosition,
+    focus: SelectionPosition,
+    dragging: bool,
+    drag_pointer: Option<MouseEvent>,
+    selected_content: std::collections::BTreeMap<SelectionPosition, String>,
+}
+
 pub(crate) fn draw<BackendType: Backend, EventSource>(
     interface: &mut Interface<BackendType, EventSource>,
     application: &mut Application,
@@ -152,6 +172,10 @@ where
     interface
         .terminal
         .draw(|frame| {
+            if application.screen_area != frame.area() {
+                application.selection = None;
+                application.screen_area = frame.area();
+            }
             draw_interface(
                 frame,
                 &application.messages,
@@ -161,6 +185,13 @@ where
                 application.scroll_from_bottom,
                 &mut application.maximum_scroll,
             );
+            draw_selection(
+                frame,
+                &mut application.selection,
+                application
+                    .maximum_scroll
+                    .saturating_sub(application.scroll_from_bottom),
+            );
         })
         .map_err(io::Error::other)?;
     Ok(())
@@ -169,7 +200,7 @@ where
 #[derive(Clone, Copy)]
 pub(crate) enum InterfaceInput {
     Key(KeyEvent),
-    Mouse(MouseEventKind),
+    Mouse(MouseEvent),
     Exit,
     Redraw,
 }
@@ -185,7 +216,7 @@ where
         Some(Ok(Event::Key(key))) if key.kind == KeyEventKind::Press => {
             Ok(InterfaceInput::Key(key))
         }
-        Some(Ok(Event::Mouse(mouse))) => Ok(InterfaceInput::Mouse(mouse.kind)),
+        Some(Ok(Event::Mouse(mouse))) => Ok(InterfaceInput::Mouse(mouse)),
         Some(Ok(_)) => Ok(InterfaceInput::Redraw),
         Some(Err(error)) => Err(error),
         None => Ok(InterfaceInput::Exit),
@@ -207,10 +238,17 @@ pub(crate) fn handle_input(
             handle_key(application, key);
             ControlFlow::Continue(())
         }
-        InterfaceInput::Mouse(kind) => {
-            match kind {
+        InterfaceInput::Mouse(mouse) => {
+            match mouse.kind {
                 MouseEventKind::ScrollUp => scroll_up(application, 1),
                 MouseEventKind::ScrollDown => scroll_down(application, 1),
+                MouseEventKind::Down(MouseButton::Left) => begin_selection(application, mouse),
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    update_selection(application, mouse, true);
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    update_selection(application, mouse, false);
+                }
                 _ => {}
             }
             ControlFlow::Continue(())
@@ -242,6 +280,150 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
         KeyCode::PageUp => scroll_up(application, 8),
         KeyCode::PageDown => scroll_down(application, 8),
         _ => {}
+    }
+}
+
+fn get_selection_position(
+    application: &Application,
+    mouse: MouseEvent,
+) -> Option<SelectionPosition> {
+    let area = application.screen_area;
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+    let row = mouse.row.clamp(area.y, area.bottom() - 1) - area.y;
+    let conversation_height = area.height.saturating_sub(4);
+    let selection_row = if row < conversation_height {
+        let viewport_start = application
+            .maximum_scroll
+            .saturating_sub(application.scroll_from_bottom);
+        SelectionRow::Conversation(viewport_start + usize::from(row))
+    } else {
+        SelectionRow::Panel(row - conversation_height)
+    };
+    Some(SelectionPosition {
+        row: selection_row,
+        column: mouse.column.clamp(area.x, area.right() - 1) - area.x,
+    })
+}
+
+fn begin_selection(application: &mut Application, mouse: MouseEvent) {
+    application.selection =
+        get_selection_position(application, mouse).map(|position| ScreenSelection {
+            anchor: position,
+            focus: position,
+            dragging: true,
+            drag_pointer: None,
+            selected_content: std::collections::BTreeMap::new(),
+        });
+}
+
+fn update_selection(application: &mut Application, mouse: MouseEvent, dragging: bool) {
+    let Some(position) = get_selection_position(application, mouse) else {
+        return;
+    };
+    let Some(selection) = application
+        .selection
+        .as_mut()
+        .filter(|selection| selection.dragging)
+    else {
+        return;
+    };
+    selection.focus = position;
+    selection.dragging = dragging;
+    selection.drag_pointer = dragging.then_some(mouse);
+    let start = selection.anchor.min(selection.focus);
+    let end = selection.anchor.max(selection.focus);
+    selection
+        .selected_content
+        .retain(|position, _| *position >= start && *position <= end);
+}
+
+pub(crate) fn is_selection_dragging(application: &Application) -> bool {
+    application
+        .selection
+        .as_ref()
+        .is_some_and(|selection| selection.drag_pointer.is_some())
+}
+
+pub(crate) fn advance_selection_scroll(application: &mut Application) {
+    let Some(mouse) = application
+        .selection
+        .as_ref()
+        .and_then(|selection| selection.drag_pointer)
+    else {
+        return;
+    };
+    let area = application.screen_area;
+    let conversation_height = area.height.saturating_sub(4);
+    if conversation_height == 0 {
+        return;
+    }
+    if mouse.row <= area.y {
+        scroll_up(application, 1);
+    } else if mouse.row == area.y + conversation_height - 1 {
+        scroll_down(application, 1);
+    } else {
+        return;
+    }
+    update_selection(application, mouse, true);
+}
+
+fn draw_selection(
+    frame: &mut Frame<'_>,
+    selection: &mut Option<ScreenSelection>,
+    viewport_start: usize,
+) {
+    let Some(active_selection) = selection.as_mut() else {
+        return;
+    };
+    if active_selection.anchor == active_selection.focus {
+        return;
+    }
+    let start = active_selection.anchor.min(active_selection.focus);
+    let end = active_selection.anchor.max(active_selection.focus);
+    let area = frame.area();
+    let conversation_height = area.height.saturating_sub(4);
+    let buffer = frame.buffer_mut();
+    let mut positions = Vec::new();
+    for row in 0..area.height {
+        let selection_row = if row < conversation_height {
+            SelectionRow::Conversation(viewport_start + usize::from(row))
+        } else {
+            SelectionRow::Panel(row - conversation_height)
+        };
+        for column in 0..area.width {
+            let position = SelectionPosition {
+                row: selection_row,
+                column,
+            };
+            let cell = &buffer[(area.x + column, area.y + row)];
+            let character_width = u16::try_from(cell.symbol().width())
+                .unwrap_or(u16::MAX)
+                .max(1);
+            let last_character_cell = SelectionPosition {
+                row: selection_row,
+                column: column.saturating_add(character_width - 1),
+            };
+            if last_character_cell < start || position > end {
+                continue;
+            }
+            if active_selection
+                .selected_content
+                .get(&position)
+                .is_some_and(|previous| previous != cell.symbol())
+            {
+                *selection = None;
+                return;
+            }
+            active_selection
+                .selected_content
+                .insert(position, cell.symbol().to_owned());
+            positions.push((area.x + column, area.y + row));
+        }
+    }
+    for position in positions {
+        buffer[position].set_style(Style::default().add_modifier(Modifier::REVERSED));
     }
 }
 

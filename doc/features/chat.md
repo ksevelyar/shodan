@@ -5,6 +5,9 @@
 * User can chat with a Llama model in a console session.
 * Conversation history is retained during the session.
 * User can scroll conversation history one line at a time with the mouse wheel anywhere in the terminal.
+* User can select text across the interface by dragging the mouse.
+* User can scroll conversation history while keeping a selection.
+* User can extend a conversation selection by dragging to the edge of the conversation.
 * Model responses stream as they are generated.
 * User sees model thinking in grey as it streams.
 * User sees tool calls and their results in the conversation.
@@ -70,7 +73,26 @@
 * User sees the thinking in grey before the model finishes.
 * Model reads the file and responds.
 
-### 8. User exits with Ctrl-C
+### 8. User selects visible text
+
+* User receives a response and types a message.
+* User drags across conversation text, the message input, and the status panel.
+* User sees the selected text highlighted.
+* User drags in the opposite direction and sees the new selection highlighted.
+
+### 9. User scrolls with a conversation selection
+
+* User receives a long response and selects part of the conversation.
+* User scrolls up with the mouse wheel and scrolls back down.
+* User sees the original selection highlighted.
+
+### 10. User extends a selection beyond the visible conversation
+
+* User receives a long response and starts selecting conversation text.
+* User drags to the top of the conversation and holds the mouse button.
+* Conversation scrolls up and extends the selection.
+
+### 11. User exits with Ctrl-C
 
 * User starts a session.
 * User presses Ctrl-C.

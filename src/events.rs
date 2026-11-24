@@ -68,7 +68,9 @@ where
                 let event = event.ok_or_else(|| io::Error::other("event channel closed"))?;
                 chats::apply_event(application, event);
             }
-            () = tokio::time::sleep(Duration::from_millis(80)), if application.statistics.response_started.is_some() => {}
+            () = tokio::time::sleep(Duration::from_millis(80)), if application.statistics.response_started.is_some() || interface::is_selection_dragging(application) => {
+                interface::advance_selection_scroll(application);
+            }
         }
     }
 }

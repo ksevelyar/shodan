@@ -31,6 +31,8 @@ pub struct Application {
     pub(crate) input: String,
     pub(crate) scroll_from_bottom: usize,
     pub(crate) maximum_scroll: usize,
+    pub(crate) selection: Option<interface::ScreenSelection>,
+    pub(crate) screen_area: ratatui::layout::Rect,
     pub(crate) server_address: String,
     pub(crate) client: reqwest::Client,
     pub(crate) messages: Vec<Message>,
@@ -70,6 +72,8 @@ where
         input: String::new(),
         scroll_from_bottom: 0,
         maximum_scroll: 0,
+        selection: None,
+        screen_area: ratatui::layout::Rect::default(),
     };
     Ok((application, interface, background_events))
 }
