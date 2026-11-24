@@ -1,0 +1,44 @@
+use std::{io, path::Path};
+
+use tokio::io::{AsyncBufReadExt, BufReader};
+
+pub(super) async fn read_file(
+    path: &Path,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> io::Result<String> {
+    let first_line = offset.unwrap_or(1);
+    if first_line == 0 || limit == Some(0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "offset and limit must be greater than zero",
+        ));
+    }
+    let file = tokio::fs::File::open(path).await?;
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    for _ in 1..first_line {
+        line.clear();
+        if reader.read_line(&mut line).await? == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "offset is beyond the end of the file",
+            ));
+        }
+    }
+    let mut content = String::new();
+    for line_number in 0..limit.unwrap_or(usize::MAX) {
+        line.clear();
+        if reader.read_line(&mut line).await? == 0 {
+            if line_number == 0 && first_line > 1 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "offset is beyond the end of the file",
+                ));
+            }
+            break;
+        }
+        content.push_str(&line);
+    }
+    Ok(content)
+}

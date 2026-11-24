@@ -10,4 +10,4 @@
 
 ## Event flow
 
-The interface loop owns application state and rendering. A Tokio task sends requests to the llama.cpp server and passes streamed response events to the interface loop through a channel. The interface loop updates conversation history and redraws the interface.
+The event loop owns application state and rendering. Background tasks send model and tool events to the event loop through a channel. The event loop updates conversation history, starts tool execution and model requests, and redraws the interface. Turn identifiers distinguish current events from events queued before cancellation.

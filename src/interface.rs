@@ -21,7 +21,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     application::{Application, Statistics, abort_response},
-    chats::{Message, Role, send_message},
+    chats::{Message, ToolCall, send_message},
 };
 
 enum Palette {
@@ -257,6 +257,20 @@ fn scroll_down(application: &mut Application, lines: usize) {
         .saturating_sub(lines);
 }
 
+fn format_model_message(content: &str, thinking: &str, tool_calls: &[ToolCall]) -> String {
+    let mut sections = Vec::new();
+    if !thinking.is_empty() {
+        sections.push(format!("Thinking:\n{thinking}"));
+    }
+    if !content.is_empty() {
+        sections.push(content.to_owned());
+    }
+    for call in tool_calls {
+        sections.push(format!("{} {}", call.name, call.arguments));
+    }
+    sections.join("\n")
+}
+
 pub(crate) fn draw_interface(
     frame: &mut Frame<'_>,
     messages: &[Message],
@@ -277,17 +291,30 @@ pub(crate) fn draw_interface(
     let width = usize::from(areas[0].width).max(1);
     let mut lines = Vec::new();
     for message in messages {
-        if matches!(message.role, Role::System) {
-            continue;
-        }
-        for line in message.content.split('\n') {
+        let (content, user, aborted) = match message {
+            Message::System(_) => continue,
+            Message::User(content) => (content.clone(), true, false),
+            Message::FailedResponse(content) => (content.clone(), false, false),
+            Message::ToolResult { content, .. } => (format!("Result:\n{content}"), false, false),
+            Message::Model {
+                content,
+                thinking,
+                tool_calls,
+                aborted,
+            } => (
+                format_model_message(content, thinking, tool_calls),
+                false,
+                *aborted,
+            ),
+        };
+        for line in content.split('\n') {
             let wrapped_lines = if line.is_empty() {
                 vec![std::borrow::Cow::Borrowed("")]
             } else {
                 textwrap::wrap(line, width)
             };
             for wrapped_line in wrapped_lines {
-                if matches!(message.role, Role::User) {
+                if user {
                     let padding = width.saturating_sub(wrapped_line.width());
                     lines.push(
                         Line::from(format!("{wrapped_line}{}", " ".repeat(padding)))
@@ -298,7 +325,7 @@ pub(crate) fn draw_interface(
                 }
             }
         }
-        if message.aborted {
+        if aborted {
             for line in textwrap::wrap("Request was aborted", width) {
                 lines.push(
                     Line::from(line.into_owned())
@@ -310,7 +337,7 @@ pub(crate) fn draw_interface(
     }
     if let Some(error) = error {
         lines.extend(
-            textwrap::wrap(&format!("Error: {error}"), width)
+            textwrap::wrap(&format!("Request failed: {error}"), width)
                 .into_iter()
                 .map(|line| Line::from(line.into_owned())),
         );
