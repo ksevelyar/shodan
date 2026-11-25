@@ -2,19 +2,28 @@ mod bash;
 mod ls;
 mod read;
 
-use std::{io, path::Path};
+use std::path::Path;
+
+use crate::application::ApplicationError;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 #[doc = "# Errors\nReturns an error if the command cannot be spawned."]
-pub async fn run_bash_command(command: &str) -> io::Result<String> {
-    bash::run_command(command).await
+pub async fn run_bash_command(command: &str) -> Result<String, ApplicationError> {
+    bash::run_command(command)
+        .await
+        .map_err(|error| ApplicationError::Tool(format!("Failed to run bash command: {error}")))
 }
 
 #[doc = "# Errors\nReturns an error if the directory cannot be listed."]
-pub async fn list_directory(path: &Path) -> io::Result<String> {
-    ls::list_directory(path).await
+pub async fn list_directory(path: &Path) -> Result<String, ApplicationError> {
+    ls::list_directory(path).await.map_err(|error| {
+        ApplicationError::Tool(format!(
+            "Failed to list directory {}: {error}",
+            path.display()
+        ))
+    })
 }
 
 #[doc = "# Errors\nReturns an error if the file cannot be read or the line range is invalid."]
@@ -22,8 +31,10 @@ pub async fn read_file(
     path: &Path,
     offset: Option<usize>,
     limit: Option<usize>,
-) -> io::Result<String> {
-    read::read_file(path, offset, limit).await
+) -> Result<String, ApplicationError> {
+    read::read_file(path, offset, limit).await.map_err(|error| {
+        ApplicationError::Tool(format!("Failed to read file {}: {error}", path.display()))
+    })
 }
 
 #[derive(Deserialize)]

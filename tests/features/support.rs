@@ -10,9 +10,9 @@ use axum::{
     Json, Router,
     body::Body,
     extract::State,
-    http::{HeaderValue, StatusCode, header},
+    http::{HeaderValue, header},
     response::Response,
-    routing::{get, post},
+    routing::post,
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{
@@ -21,7 +21,7 @@ use ratatui::{
     layout::{Position, Size},
 };
 use serde_json::{Value, json};
-use shodan::application::{TerminalMode, build_application, run_application};
+use shodan::{application::run, interface::TerminalMode, settings::ApplicationSettings};
 use tokio::{
     net::TcpListener,
     sync::{mpsc, watch},
@@ -33,6 +33,28 @@ use tokio_stream::{
     wrappers::{ReceiverStream, UnboundedReceiverStream},
 };
 
+pub static LOGIN_PORT: LoginPort = LoginPort(tokio::sync::Mutex::const_new(()));
+
+pub struct LoginPort(tokio::sync::Mutex<()>);
+
+impl LoginPort {
+    pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        let guard = self.0.lock().await;
+        let port_timeout = Duration::from_secs(5);
+        timeout(port_timeout, async {
+            loop {
+                if TcpListener::bind("127.0.0.1:1455").await.is_ok() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the login callback port becomes available");
+        guard
+    }
+}
+
 pub const ASTEROIDS_PLAN_PROMPT: &str = "Write a proof-of-concept plan for a monochrome, 2D, low-poly Asteroids game in Bevy. Under ## Requirements, describe the game’s behavior without implementation details. Under ## User scenarios, write scenarios derived from those requirements. Name each scenario using ### 1. User ...";
 
 pub struct CapturedRequest {
@@ -42,30 +64,12 @@ pub struct CapturedRequest {
 
 #[derive(Default)]
 pub struct RecordedLlama {
-    available_models: Option<String>,
-    model_loads: Vec<(&'static str, String, String)>,
     model_streams: Vec<(&'static str, VecDeque<String>)>,
 }
 
 impl RecordedLlama {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn mock_available_models(mut self, available_models: &str) -> Self {
-        self.available_models = Some(available_models.to_owned());
-        self
-    }
-
-    pub fn mock_model_load(
-        mut self,
-        model: &'static str,
-        loading_models: &str,
-        loaded_models: &str,
-    ) -> Self {
-        self.model_loads
-            .push((model, loading_models.to_owned(), loaded_models.to_owned()));
-        self
     }
 
     pub fn mock_stream(mut self, model: &'static str, stream_path: &str) -> Self {
@@ -83,9 +87,14 @@ impl RecordedLlama {
     }
 
     pub async fn start(self) -> (String, mpsc::Receiver<CapturedRequest>) {
-        let available_models = self
-            .available_models
-            .expect("the mock server replays available models");
+        self.start_at_path("/v1/chat/completions").await
+    }
+
+    pub async fn start_openai(self) -> (String, mpsc::Receiver<CapturedRequest>) {
+        self.start_at_path("/v1/responses").await
+    }
+
+    async fn start_at_path(self, path: &str) -> (String, mpsc::Receiver<CapturedRequest>) {
         let (requests, receiver) = mpsc::channel(8);
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
@@ -94,13 +103,13 @@ impl RecordedLlama {
             .local_addr()
             .expect("the mock server has a local address");
         let router = Router::new()
-            .route("/v1/models", get(list_models))
-            .route("/models/load", post(load_model))
-            .route("/v1/chat/completions", post(stream_response))
+            .route(path, post(stream_response))
+            .route(
+                "/api/accounts/oauth/token",
+                post(refresh_openai_credentials),
+            )
             .with_state(LlamaState {
                 requests,
-                available_models: Arc::new(Mutex::new(AvailableModels::Serving(available_models))),
-                model_loads: self.model_loads,
                 model_streams: Arc::new(Mutex::new(self.model_streams)),
             });
         tokio::spawn(async move {
@@ -112,121 +121,41 @@ impl RecordedLlama {
     }
 }
 
-enum AvailableModels {
-    Serving(String),
-    Loading {
-        loading: String,
-        loaded: String,
-        loading_served: bool,
-    },
+async fn refresh_openai_credentials(body: String) -> (axum::http::StatusCode, Json<Value>) {
+    let (status, response) = if body.contains("client_id=invalid-client") {
+        (
+            axum::http::StatusCode::BAD_REQUEST,
+            include_str!("fixtures/openai/refresh-error.json"),
+        )
+    } else if body.contains("grant_type=authorization_code") {
+        (
+            axum::http::StatusCode::OK,
+            include_str!("fixtures/openai/login.json"),
+        )
+    } else {
+        (
+            axum::http::StatusCode::OK,
+            include_str!("fixtures/openai/refresh.json"),
+        )
+    };
+    (
+        status,
+        Json(serde_json::from_str(response).expect("the recorded token response is valid JSON")),
+    )
 }
 
 type RecordedStreams = Vec<(&'static str, VecDeque<String>)>;
 
-fn read_fixture(fixture_path: &str) -> String {
-    std::fs::read_to_string(fixture_path)
-        .unwrap_or_else(|error| panic!("the mock server cannot read {fixture_path}: {error}"))
-}
-
-fn current_models(models: &mut AvailableModels) -> String {
-    match models {
-        AvailableModels::Serving(fixture_path) => read_fixture(fixture_path),
-        AvailableModels::Loading {
-            loading,
-            loaded,
-            loading_served,
-        } => {
-            if *loading_served {
-                read_fixture(loaded)
-            } else {
-                *loading_served = true;
-                read_fixture(loading)
-            }
-        }
-    }
-}
-
-fn assert_loaded_model(models_fixture: &str, requested_model: &str) {
-    let models: Value = serde_json::from_str(models_fixture).expect("the models fixture is JSON");
-    let loaded = models["data"]
-        .as_array()
-        .expect("the models fixture lists models")
-        .iter()
-        .any(|model| model["id"] == requested_model && model["status"]["value"] == "loaded");
-    assert!(
-        loaded,
-        "the application chats with an unloaded model: {requested_model}"
-    );
-}
-
 #[derive(Clone)]
 struct LlamaState {
     requests: mpsc::Sender<CapturedRequest>,
-    available_models: Arc<Mutex<AvailableModels>>,
-    model_loads: Vec<(&'static str, String, String)>,
     model_streams: Arc<Mutex<RecordedStreams>>,
 }
 
-async fn list_models(State(server): State<LlamaState>) -> Response {
-    let models_fixture = current_models(
-        &mut server
-            .available_models
-            .lock()
-            .expect("the mock server state is not poisoned"),
-    );
-    Response::builder()
-        .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
-        .body(Body::from(models_fixture))
-        .expect("the models fixture response is valid")
-}
-
-async fn load_model(
-    State(server): State<LlamaState>,
-    Json(body): Json<Value>,
-) -> ([(header::HeaderName, &'static str); 1], &'static str) {
-    let requested_model = body
-        .get("model")
-        .and_then(Value::as_str)
-        .expect("the load request names a model");
-    assert_eq!(body, json!({"model": requested_model}));
-    let (_, loading_models, loaded_models) = server
-        .model_loads
-        .iter()
-        .find(|(model, _, _)| *model == requested_model)
-        .unwrap_or_else(|| panic!("the application loads an unmocked model: {requested_model}"));
-    *server
-        .available_models
-        .lock()
-        .expect("the mock server state is not poisoned") = AvailableModels::Loading {
-        loading: loading_models.clone(),
-        loaded: loaded_models.clone(),
-        loading_served: false,
-    };
-    (
-        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
-        include_str!("fixtures/llama-cpp/load-model/success.json"),
-    )
-}
-
 async fn stream_response(State(server): State<LlamaState>, Json(body): Json<Value>) -> Response {
-    let requested_model = body.get("model").and_then(Value::as_str).map(str::to_owned);
-    if requested_model.is_none() || requested_model.as_deref() == Some("") {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
-            .body(Body::from(include_str!(
-                "fixtures/llama-cpp/chat/missing-model-error.json"
-            )))
-            .expect("the recorded error response is valid");
-    }
-    let requested_model = requested_model.expect("the chat request names a model");
-    let models_fixture = current_models(
-        &mut server
-            .available_models
-            .lock()
-            .expect("the mock server state is not poisoned"),
-    );
-    assert_loaded_model(&models_fixture, &requested_model);
+    let requested_model = body["model"]
+        .as_str()
+        .expect("the chat request names a model");
     let stream_fixture = server
         .model_streams
         .lock()
@@ -235,7 +164,6 @@ async fn stream_response(State(server): State<LlamaState>, Json(body): Json<Valu
         .find(|(streamed_model, _)| *streamed_model == requested_model)
         .and_then(|(_, streams)| streams.pop_front());
     let (response_chunks, receiver) = mpsc::channel::<String>(8);
-    let request_body = body.clone();
     let captured_request = CapturedRequest {
         response_chunks: response_chunks.clone(),
         body,
@@ -247,7 +175,7 @@ async fn stream_response(State(server): State<LlamaState>, Json(body): Json<Valu
         .expect("the feature test receives model requests");
     if let Some(stream_path) = stream_fixture {
         tokio::spawn(async move {
-            stream_recorded_events(&response_chunks, &stream_path, &request_body).await;
+            stream_recorded_events(&response_chunks, &stream_path).await;
         });
     }
     let stream = ReceiverStream::new(receiver).map(Ok::<_, Infallible>);
@@ -259,12 +187,9 @@ async fn stream_response(State(server): State<LlamaState>, Json(body): Json<Valu
     response
 }
 
-async fn stream_recorded_events(
-    response_chunks: &mpsc::Sender<String>,
-    stream_path: &str,
-    request_body: &Value,
-) {
-    let response = record_or_read_stream(stream_path, request_body).await;
+async fn stream_recorded_events(response_chunks: &mpsc::Sender<String>, stream_path: &str) {
+    let response = std::fs::read_to_string(stream_path)
+        .expect("the scenario has a recorded provider response");
     let event_delay = Duration::from_millis(5);
     let mut events = response.split("\n\n").peekable();
     while let Some(event) = events.next() {
@@ -276,36 +201,6 @@ async fn stream_recorded_events(
             return;
         }
         tokio::time::sleep(event_delay).await;
-    }
-}
-
-async fn record_or_read_stream(stream_path: &str, request_body: &Value) -> String {
-    if std::env::var_os("SHODAN_RECORD_LLAMA").is_some() {
-        let address = std::env::var("SHODAN_LLAMA_ADDRESS")
-            .unwrap_or_else(|_| "http://127.0.0.1:8080".to_owned());
-        let client = reqwest::Client::new();
-        let response = client
-            .post(format!("{address}/v1/chat/completions"))
-            .json(request_body)
-            .send()
-            .await
-            .expect("the running server accepts the request")
-            .error_for_status()
-            .expect("the running server accepts the conversation")
-            .text()
-            .await
-            .expect("the running server streams a response");
-        let fixture_path = std::path::Path::new(stream_path);
-        std::fs::create_dir_all(
-            fixture_path
-                .parent()
-                .expect("the fixture has a parent directory"),
-        )
-        .expect("the fixture directory can be created");
-        std::fs::write(fixture_path, &response).expect("the response can be recorded");
-        response
-    } else {
-        std::fs::read_to_string(stream_path).expect("the scenario has a recorded provider response")
     }
 }
 
@@ -328,13 +223,13 @@ pub fn assert_received_messages(request: &CapturedRequest, messages: &[(&str, &s
 pub async fn send_recorded_response(request: &CapturedRequest) {
     send_response_bytes(
         request,
-        include_str!("fixtures/llama-cpp/chat/lfm3-asteroids-plan.txt"),
+        include_str!("fixtures/llama/chat/lfm3-asteroids-plan.txt"),
     )
     .await;
 }
 
 fn split_recorded_response() -> (&'static str, &'static str) {
-    let response = include_str!("fixtures/llama-cpp/chat/lfm3-asteroids-plan.txt");
+    let response = include_str!("fixtures/llama/chat/lfm3-asteroids-plan.txt");
     let content_start = response
         .find("\"content\":\"")
         .expect("the response has content");
@@ -439,25 +334,55 @@ impl Backend for SharedTerminal {
     }
 }
 
+pub struct TestHome {
+    path: std::path::PathBuf,
+}
+
+impl TestHome {
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for TestHome {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.path).expect("the temporary home can be removed");
+    }
+}
+
+pub fn create_home(configuration: Value) -> TestHome {
+    let Value::Object(configuration) = configuration else {
+        panic!("the provider configuration must be an object");
+    };
+    let path = std::env::temp_dir().join(format!("shodan-home-{}", uuid::Uuid::new_v4()));
+    let directory = path.join(".shodan");
+    std::fs::create_dir_all(&directory).expect("the configuration directory can be created");
+    let file = std::fs::File::create(directory.join("settings.json"))
+        .expect("the configuration file can be created");
+    serde_json::to_writer(file, &configuration).expect("the configuration can be written");
+    TestHome { path }
+}
+
 pub struct TestApplication {
     events: mpsc::UnboundedSender<io::Result<Event>>,
     frames: watch::Receiver<Buffer>,
-    task: JoinHandle<io::Result<()>>,
+    task: JoinHandle<Result<(), shodan::application::ApplicationError>>,
 }
 
-pub fn run_test_application(server_address: String, width: u16, height: u16) -> TestApplication {
+pub fn run_test_application(settings: ApplicationSettings) -> TestApplication {
+    let width = 120;
+    let height = 24;
     let backend = TestBackend::new(width, height);
     let (frames, receiver) = watch::channel(backend.buffer().clone());
     let backend = SharedTerminal { backend, frames };
     let (events, event_receiver) = mpsc::unbounded_channel();
-    let (application, interface, updates) = build_application(
-        server_address,
-        backend,
-        UnboundedReceiverStream::new(event_receiver),
-        TerminalMode::Unmanaged,
-    )
-    .expect("the feature test builds the application");
-    let task = tokio::spawn(run_application(application, interface, updates));
+    let task = tokio::spawn(run(settings, || {
+        (
+            backend,
+            UnboundedReceiverStream::new(event_receiver),
+            TerminalMode::Unmanaged,
+        )
+    }));
     TestApplication {
         events,
         frames: receiver,

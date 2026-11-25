@@ -1,23 +1,22 @@
 use super::support::{
-    ASTEROIDS_PLAN_PROMPT, RecordedLlama, assert_received_messages, read_bottom_line, read_history,
-    receive_request, run_test_application, send_recorded_response, send_response_bytes,
+    ASTEROIDS_PLAN_PROMPT, RecordedLlama, assert_received_messages, create_home, read_bottom_line,
+    read_history, receive_request, run_test_application, send_recorded_response,
+    send_response_bytes,
 };
 use std::time::Duration;
 
 use crossterm::event::KeyCode;
+use shodan::settings::build_settings;
 
 #[tokio::test]
 async fn user_views_rounded_cache_hits() {
-    let (server_address, mut requests) = RecordedLlama::new()
-        .mock_available_models("tests/features/fixtures/llama-cpp/models/inkling-loaded.json")
-        .mock_model_load(
-            "Qwen3.8-27B-UD-IQ4_XS",
-            "tests/features/fixtures/llama-cpp/models/qwen-loading.json",
-            "tests/features/fixtures/llama-cpp/models/qwen-loaded.json",
-        )
-        .start()
-        .await;
-    let mut application = run_test_application(server_address, 120, 12);
+    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let home = create_home(
+        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}, {"name": "Qwen3.8-27B-UD-IQ4_XS", "thinking_level": "low"}]}}}),
+    );
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
     application
         .wait_for_screen(|screen| read_bottom_line(screen).contains("Inkling-2-Mini-UD-IQ3_XXS"))
         .await;
@@ -29,7 +28,7 @@ async fn user_views_rounded_cache_hits() {
     let request = receive_request(&mut requests).await;
     send_response_bytes(
         &request,
-        include_str!("fixtures/llama-cpp/chat/qwen-hello-cached.txt"),
+        include_str!("fixtures/llama/chat/qwen-hello-cached.txt"),
     )
     .await;
     application
@@ -39,32 +38,29 @@ async fn user_views_rounded_cache_hits() {
 
 #[tokio::test]
 async fn user_views_thinking_level() {
-    let (server_address, _requests) = RecordedLlama::new()
-        .mock_available_models("tests/features/fixtures/llama-cpp/models/inkling-loaded.json")
-        .mock_model_load(
-            "Qwen3.8-27B-UD-IQ4_XS",
-            "tests/features/fixtures/llama-cpp/models/qwen-loading.json",
-            "tests/features/fixtures/llama-cpp/models/qwen-loaded.json",
-        )
-        .start()
-        .await;
-    let mut application = run_test_application(server_address, 120, 12);
+    let server_address = "http://127.0.0.1:8080";
+    let home = create_home(
+        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "Qwen3.8-27B-UD-IQ4_XS", "models": [{"name": "Qwen3.8-27B-UD-IQ4_XS", "thinking_level": "low"}]}}}),
+    );
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
     application
         .wait_for_screen(|screen| {
-            read_bottom_line(screen).ends_with("llama.cpp Inkling-2-Mini-UD-IQ3_XXS low")
+            read_bottom_line(screen).ends_with("llama Qwen3.8-27B-UD-IQ4_XS low")
         })
         .await;
 }
 
 #[tokio::test]
 async fn user_views_session_statistics() {
-    let (server_address, mut requests) = RecordedLlama::new()
-        .mock_available_models(
-            "tests/features/fixtures/llama-cpp/models/lfm3-and-minicpm-loaded.json",
-        )
-        .start()
-        .await;
-    let mut application = run_test_application(server_address, 120, 12);
+    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let home = create_home(
+        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "LFM3-Omni-2B-Q4_K_M", "models": [{"name": "LFM3-Omni-2B-Q4_K_M"}, {"name": "MiniCPM5-2B-Q4_K_M"}]}}}),
+    );
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
 
     application
         .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
@@ -88,7 +84,7 @@ async fn user_views_session_statistics() {
 
     let status = read_bottom_line(&screen);
     let provider_position = status
-        .find("llama.cpp")
+        .find("llama")
         .expect("the status panel displays the provider");
     let provider_column = status[..provider_position].chars().count();
     assert!(provider_column >= 60);
@@ -97,13 +93,13 @@ async fn user_views_session_statistics() {
 
 #[tokio::test]
 async fn user_scrolls_conversation() {
-    let (server_address, mut requests) = RecordedLlama::new()
-        .mock_available_models(
-            "tests/features/fixtures/llama-cpp/models/lfm3-and-minicpm-loaded.json",
-        )
-        .start()
-        .await;
-    let mut application = run_test_application(server_address, 120, 12);
+    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let home = create_home(
+        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "LFM3-Omni-2B-Q4_K_M", "models": [{"name": "LFM3-Omni-2B-Q4_K_M"}, {"name": "MiniCPM5-2B-Q4_K_M"}]}}}),
+    );
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
 
     application
         .wait_for_screen(|screen| read_bottom_line(screen).contains("LFM3-Omni-2B-Q4_K_M"))
@@ -125,13 +121,13 @@ async fn user_scrolls_conversation() {
 
 #[tokio::test]
 async fn user_views_response_time() {
-    let (server_address, mut requests) = RecordedLlama::new()
-        .mock_available_models(
-            "tests/features/fixtures/llama-cpp/models/lfm3-and-minicpm-loaded.json",
-        )
-        .start()
-        .await;
-    let mut application = run_test_application(server_address, 120, 12);
+    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let home = create_home(
+        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "LFM3-Omni-2B-Q4_K_M", "models": [{"name": "LFM3-Omni-2B-Q4_K_M"}, {"name": "MiniCPM5-2B-Q4_K_M"}]}}}),
+    );
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
 
     application
         .wait_for_screen(|screen| {
@@ -149,7 +145,7 @@ async fn user_views_response_time() {
         })
         .await;
     let status = read_bottom_line(&screen);
-    assert!(status.ends_with("llama.cpp LFM3-Omni-2B-Q4_K_M"));
+    assert!(status.ends_with("llama LFM3-Omni-2B-Q4_K_M"));
     let spinner = status
         .chars()
         .find(|character| ('⠁'..='⣿').contains(character))

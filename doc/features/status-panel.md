@@ -11,10 +11,10 @@
 
 ## User scenarios
 ### 1. User views session statistics
-* User sends a message to `LFM3-Omni-2B-Q4_K_M` through llama.cpp.
+* User sends a message to `LFM3-Omni-2B-Q4_K_M` through llama.
 * User receives a response with 82 prompt tokens, 0 cached tokens, and 383 completion tokens.
 * User sees `↑82 ↓383 CH0%` on the left of the bottom panel.
-* User sees `llama.cpp LFM3-Omni-2B-Q4_K_M` on the right.
+* User sees `llama LFM3-Omni-2B-Q4_K_M` on the right.
 
 ### 2. User views response time
 * User opens the application and sees `↑0 ↓0 CH0%` at the left of the bottom panel.
@@ -33,7 +33,7 @@
 ### 4. User views the thinking level
 
 * User starts a session with Qwen3.8-27B-UD-IQ4_XS.
-* User sees `llama.cpp Qwen3.8-27B-UD-IQ4_XS low` on the right of the bottom panel.
+* User sees `llama Qwen3.8-27B-UD-IQ4_XS low` on the right of the bottom panel.
 
 ### 5. User views rounded cache hits
 

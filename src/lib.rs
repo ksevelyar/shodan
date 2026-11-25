@@ -1,7 +1,9 @@
 pub mod application;
 mod chats;
 mod events;
-mod interface;
+pub mod interface;
 mod models;
-mod provider;
+mod providers;
+mod session;
+pub mod settings;
 pub mod tools;
