@@ -2,18 +2,21 @@ use std::io;
 
 use crossterm::event::EventStream;
 use ratatui::backend::CrosstermBackend;
-use shodan::application::{TerminalMode, build_application, run_application};
+use shodan::{application::run, interface::TerminalMode, settings::build_settings};
 
 #[tokio::main]
-async fn main() -> io::Result<()> {
-    let server_address = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "http://127.0.0.1:8080".to_owned());
-    let (application, interface, updates) = build_application(
-        server_address,
-        CrosstermBackend::new(io::stdout()),
-        EventStream::new(),
-        TerminalMode::Managed,
-    )?;
-    run_application(application, interface, updates).await
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let home_directory = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| io::Error::other("home directory is unavailable"))?;
+    let settings = build_settings(home_directory, std::env::args().skip(1))?;
+    run(settings, || {
+        (
+            CrosstermBackend::new(io::stdout()),
+            EventStream::new(),
+            TerminalMode::Managed,
+        )
+    })
+    .await?;
+    Ok(())
 }

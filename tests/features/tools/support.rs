@@ -1,10 +1,11 @@
 use std::{fs, path::Path};
 
 use serde_json::Value;
+use shodan::settings::build_settings;
 
 use super::super::support::{
-    CapturedRequest, RecordedLlama, read_bottom_line, read_screen, receive_request_or_error,
-    run_test_application, send_response_bytes,
+    CapturedRequest, RecordedLlama, create_home, read_bottom_line, read_screen,
+    receive_request_or_error, run_test_application, send_response_bytes,
 };
 
 pub(crate) async fn send_scenario_response(
@@ -12,48 +13,10 @@ pub(crate) async fn send_scenario_response(
     scenario: &str,
     response_number: usize,
 ) {
-    let directory = Path::new("tests/features/fixtures/llama-cpp/tools").join(scenario);
+    let directory = Path::new("tests/features/fixtures/llama/tools").join(scenario);
     let path = directory.join(format!("response-{response_number}.txt"));
-    let response = if std::env::var_os("SHODAN_RECORD_LLAMA").is_some() {
-        let address = std::env::var("SHODAN_LLAMA_ADDRESS")
-            .unwrap_or_else(|_| "http://127.0.0.1:8080".to_owned());
-        let client = reqwest::Client::new();
-        let models: Value = client
-            .get(format!("{address}/v1/models"))
-            .send()
-            .await
-            .expect("the running server lists models")
-            .json()
-            .await
-            .expect("the running server returns model data");
-        let model = models["data"]
-            .as_array()
-            .expect("the model list is an array")
-            .iter()
-            .find(|model| model["status"]["value"] == "loaded")
-            .and_then(|model| model["id"].as_str())
-            .expect("the running server has a loaded model");
-        assert_eq!(
-            request.body["model"], model,
-            "the recorded model must be loaded"
-        );
-        let response = client
-            .post(format!("{address}/v1/chat/completions"))
-            .json(&request.body)
-            .send()
-            .await
-            .expect("the running server accepts the request")
-            .error_for_status()
-            .expect("the running server accepts the conversation")
-            .text()
-            .await
-            .expect("the running server streams a response");
-        fs::create_dir_all(&directory).expect("the recording directory can be created");
-        fs::write(&path, &response).expect("the response can be recorded");
-        response
-    } else {
-        fs::read_to_string(&path).expect("the scenario has a recorded provider response")
-    };
+    let response =
+        fs::read_to_string(&path).expect("the scenario has a recorded provider response");
     send_response_bytes(request, &response).await;
 }
 
@@ -66,16 +29,13 @@ pub async fn run_scenario(
     expected_exact_tool_result: Option<&str>,
     expected_responses: &[&str],
 ) {
-    let (address, mut requests) = RecordedLlama::new()
-        .mock_available_models("tests/features/fixtures/llama-cpp/models/inkling-loaded.json")
-        .mock_model_load(
-            "Qwen3.8-27B-UD-IQ4_XS",
-            "tests/features/fixtures/llama-cpp/models/qwen-loading.json",
-            "tests/features/fixtures/llama-cpp/models/qwen-loaded.json",
-        )
-        .start()
-        .await;
-    let mut application = run_test_application(address, 100, 30);
+    let (address, mut requests) = RecordedLlama::new().start().await;
+    let home = create_home(
+        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}, {"name": "Qwen3.8-27B-UD-IQ4_XS", "thinking_level": "low"}]}}}),
+    );
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
     application
         .wait_for_screen(|screen| read_bottom_line(screen).contains("Inkling-2-Mini-UD-IQ3_XXS"))
         .await;

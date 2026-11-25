@@ -20,9 +20,8 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    application::{Application, Statistics, abort_response},
-    chats::{Message, ToolCall, send_message},
-    provider,
+    application::{Application, ApplicationError, Statistics},
+    chats::{Message, ToolCall, abort_response, send_message},
 };
 
 enum Palette {
@@ -116,19 +115,24 @@ pub struct Interface<BackendType: Backend, EventSource> {
     terminal_session: Option<TerminalSession>,
 }
 
-pub(crate) fn build_interface<BackendType: Backend, EventSource>(
+#[doc = "# Errors\nReturns an error if the terminal cannot be initialized."]
+pub fn build_interface<BackendType: Backend, EventSource>(
     backend: BackendType,
     events: EventSource,
     terminal_mode: TerminalMode,
-) -> io::Result<Interface<BackendType, EventSource>>
+) -> Result<Interface<BackendType, EventSource>, ApplicationError>
 where
     BackendType::Error: Send + Sync + 'static,
 {
     let terminal_session = match terminal_mode {
-        TerminalMode::Managed => Some(TerminalSession::start()?),
+        TerminalMode::Managed => Some(TerminalSession::start().map_err(|error| {
+            ApplicationError::Terminal(format!("Failed to initialize terminal: {error}"))
+        })?),
         TerminalMode::Unmanaged => None,
     };
-    let terminal = Terminal::new(backend).map_err(io::Error::other)?;
+    let terminal = Terminal::new(backend).map_err(|error| {
+        ApplicationError::Terminal(format!("Failed to initialize terminal: {error}"))
+    })?;
     Ok(Interface {
         terminal,
         events,
@@ -138,11 +142,12 @@ where
 
 pub(crate) fn restore_terminal<BackendType: Backend, EventSource>(
     interface: &mut Interface<BackendType, EventSource>,
-) -> io::Result<()> {
+) -> Result<(), ApplicationError> {
     interface
         .terminal_session
         .as_mut()
         .map_or(Ok(()), TerminalSession::restore)
+        .map_err(|error| ApplicationError::Terminal(format!("Failed to restore terminal: {error}")))
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
@@ -168,7 +173,7 @@ pub(crate) struct ScreenSelection {
 pub(crate) fn draw<BackendType: Backend, EventSource>(
     interface: &mut Interface<BackendType, EventSource>,
     application: &mut Application,
-) -> io::Result<()>
+) -> Result<(), ApplicationError>
 where
     BackendType::Error: Send + Sync + 'static,
 {
@@ -179,15 +184,7 @@ where
                 application.selection = None;
                 application.screen_area = frame.area();
             }
-            draw_interface(
-                frame,
-                &application.messages,
-                &application.input,
-                &application.statistics,
-                application.error.as_deref(),
-                application.scroll_from_bottom,
-                &mut application.maximum_scroll,
-            );
+            draw_interface(frame, application);
             draw_selection(
                 frame,
                 &mut application.selection,
@@ -196,7 +193,7 @@ where
                     .saturating_sub(application.scroll_from_bottom),
             );
         })
-        .map_err(io::Error::other)?;
+        .map_err(|error| ApplicationError::Terminal(format!("Terminal failed: {error}")))?;
     Ok(())
 }
 
@@ -210,7 +207,7 @@ pub(crate) enum InterfaceInput {
 
 pub(crate) async fn wait_for_input<BackendType, EventSource>(
     interface: &mut Interface<BackendType, EventSource>,
-) -> io::Result<InterfaceInput>
+) -> Result<InterfaceInput, ApplicationError>
 where
     BackendType: Backend,
     EventSource: Stream<Item = io::Result<Event>> + Unpin,
@@ -221,7 +218,9 @@ where
         }
         Some(Ok(Event::Mouse(mouse))) => Ok(InterfaceInput::Mouse(mouse)),
         Some(Ok(_)) => Ok(InterfaceInput::Redraw),
-        Some(Err(error)) => Err(error),
+        Some(Err(error)) => Err(ApplicationError::Terminal(format!(
+            "Terminal failed: {error}"
+        ))),
         None => Ok(InterfaceInput::Exit),
     }
 }
@@ -272,8 +271,17 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
         }
         KeyCode::Esc => abort_response(application),
         KeyCode::Enter
-            if application.statistics.response_started.is_none()
-                && !application.statistics.model.is_empty()
+            if application.pending_authorization.is_some()
+                && !application.input.trim().is_empty() =>
+        {
+            let input = std::mem::take(&mut application.input);
+            if let Some(pending_authorization) = &application.pending_authorization {
+                let _ = pending_authorization.send(input);
+            }
+        }
+        KeyCode::Enter
+            if !matches!(application.mode, crate::settings::Mode::OpenaiLogin)
+                && application.response_started.is_none()
                 && !application.input.trim().is_empty() =>
         {
             let input = std::mem::take(&mut application.input);
@@ -281,13 +289,7 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
             application.scroll_from_bottom = 0;
         }
         KeyCode::Char(' ') if key.modifiers == KeyModifiers::CONTROL => {
-            let client = application.client.clone();
-            let address = application.server_address.clone();
-            let current_model = application.statistics.model.clone();
-            let event_sender = application.event_sender.clone();
-            tokio::spawn(async move {
-                provider::cycle_model(&client, &address, &current_model, &event_sender).await;
-            });
+            application.session.cycle_model();
         }
         KeyCode::PageUp => scroll_up(application, 8),
         KeyCode::PageDown => scroll_down(application, 8),
@@ -513,15 +515,12 @@ fn wrap_message_section(
     lines
 }
 
-pub(crate) fn draw_interface(
-    frame: &mut Frame<'_>,
-    messages: &[Message],
-    input: &str,
-    statistics: &Statistics,
-    error: Option<&str>,
-    scroll_from_bottom: usize,
-    maximum_scroll: &mut usize,
-) {
+fn draw_interface(frame: &mut Frame<'_>, application: &mut Application) {
+    let messages = &application.session.messages;
+    let input = application.input.as_str();
+    let statistics = &application.statistics;
+    let scroll_from_bottom = application.scroll_from_bottom;
+    let maximum_scroll = &mut application.maximum_scroll;
     let areas = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(1),
@@ -552,6 +551,7 @@ pub(crate) fn draw_interface(
                 thinking,
                 tool_calls,
                 aborted,
+                ..
             } => (
                 format_model_message(content, thinking, tool_calls),
                 false,
@@ -571,7 +571,7 @@ pub(crate) fn draw_interface(
         }
         lines.push(Line::default());
     }
-    if let Some(error) = error {
+    if let Some(error) = &application.error {
         lines.extend(
             textwrap::wrap(&format!("Request failed: {error}"), width)
                 .into_iter()
@@ -609,10 +609,22 @@ pub(crate) fn draw_interface(
         let cursor_column = u16::try_from(cursor_column).unwrap_or(u16::MAX);
         frame.set_cursor_position((areas[2].x + cursor_column, areas[2].y));
     }
-    draw_status(frame, areas[4], statistics);
+    draw_status(
+        frame,
+        areas[4],
+        statistics,
+        application.response_started,
+        &application.session,
+    );
 }
 
-fn draw_status(frame: &mut Frame<'_>, area: Rect, statistics: &Statistics) {
+fn draw_status(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    statistics: &Statistics,
+    response_started: Option<tokio::time::Instant>,
+    session: &crate::session::Session,
+) {
     let sent = statistics
         .prompt_tokens
         .saturating_sub(statistics.cached_tokens);
@@ -620,7 +632,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, statistics: &Statistics) {
     let cache_percentage = (u128::from(statistics.cached_tokens) * 100 + prompt_tokens / 2)
         .checked_div(prompt_tokens)
         .unwrap_or(0);
-    let response_status = if let Some(started) = statistics.response_started {
+    let response_status = if let Some(started) = response_started {
         let spinner_frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
         let frame_duration = 80;
         let frame_count = spinner_frames.len() as u128;
@@ -643,10 +655,12 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, statistics: &Statistics) {
         format_count(sent),
         format_count(statistics.completion_tokens)
     );
-    let thinking_level = statistics.thinking_level.map_or_else(String::new, |level| {
+    let model = session.get_selected_model();
+    let thinking_level = model.thinking_level.map_or_else(String::new, |level| {
         format!(" {}", level.as_provider_value())
     });
-    let right = format!("llama.cpp {}{thinking_level}", statistics.model);
+    let provider = session.provider.get_name();
+    let right = format!("{provider} {}{thinking_level}", model.name);
     let right_width = u16::try_from(right.width()).unwrap_or(u16::MAX);
     let status_areas =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(right_width)]).split(area);

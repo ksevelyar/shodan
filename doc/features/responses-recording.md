@@ -2,25 +2,40 @@
 
 ## Requirements
 
-* Tool scenarios can record responses from a local llama.cpp server.
-* Recorded responses are saved by scenario for use in feature tests.
-* The server address can be configured.
+* User can record responses from any provider using `--record`.
+* OpenAI recordings protect credentials while preserving the other response fields.
+* Recordings are saved under `recordings/` by provider and request path.
+* Recording filenames use UUIDs.
+* Event streams use the `.txt` extension.
 
 ## User scenarios
 
-### 1. User records tool responses
+### 1. User records provider responses
 
-* User loads the recorded model on a local llama.cpp server.
-* User runs the tool scenarios with recording enabled.
-* Shodan saves each response under `tests/features/fixtures/llama-cpp/tools/` in its scenario directory.
-* User runs the feature tests using the recorded responses.
+* User starts Shodan with llama, `example-model` and `--record`.
+* User sends a message.
+* The provider streams a response to `v1/chat/completions`.
+* Shodan saves the response under `recordings/llama/v1-chat-completions/` with a UUID filename and `.txt` extension.
+
+### 2. User records an OpenAI response
+
+* User starts Shodan with `--provider openai --record` and sends a message.
+* OpenAI streams a response.
+* Shodan saves the response under `recordings/openai/` by request path with a UUID filename and `.txt` extension.
+
+### 3. User records an OpenAI credential refresh
+
+* User starts Shodan with expired OpenAI credentials and `--record`.
+* Shodan refreshes the credentials and receives a response.
+* Shodan saves a sanitized authentication response with the other response fields preserved.
 
 ## Recording
 
-With the recorded model loaded on the local llama.cpp server, run:
+Run Shodan with recording enabled:
 
 ```sh
-SHODAN_RECORD_LLAMA=1 cargo test --test features features::tools:: -- --test-threads=1
+shodan --provider llama --model MODEL --record
 ```
 
-Set `SHODAN_LLAMA_ADDRESS` to use a different server address.
+Omit `--provider` and `--model` to use the configured defaults. Configure the llama server address in `~/.shodan/settings.json`.
+Copy recordings into `tests/features/fixtures/` when updating fixtures.

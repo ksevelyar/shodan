@@ -1,3 +1,6 @@
+## Design
+* economy of complexity is main goal, each moving part should be justified
+
 ## Documentation
 * Requirements must not include implementation details.
 * User scenarios describe what the application does, not what is absent.

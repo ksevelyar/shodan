@@ -1,0 +1,8 @@
+{
+  "access_token": "IdGNw05dRQCuFDD-kQ6GBo-PdhojA0Y9h16DMRWJ1tY.JbDWzHScQfS0DLO3M_csuISOILmHf0s_lPwSuOPISOI.oAkr0Lx8Q0aIq2HWwS1pfCqobVhK_E3qke8UCGz0ZuY",
+  "expires_in": 3600,
+  "id_token": "k1NBBGl3SQCmu0ekJFujPXHs6x20XUvtngwQxNwgDsA.n4v6W2_kTau2EKeS4aEP3k3e53nE4kw1vg0hQiW2KMI.iM376NS7QjaPrSW8XqdDJX6lyn0YZ04Dic_aSbs6f3Y",
+  "refresh_token": "rV5bUGkDSKOsvhcT7FHJ6yqiiU5NUEmLoIyzRxAIUtk.vcJeyJCVScCqjtUW66QmIlY4ustkukQWt89JofuLOWc.0Z3olE_EQ5KXfDoS4sqK41fvKC09UkC5joR0AoSrYrQ",
+  "scope": "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct",
+  "token_type": "Bearer"
+}

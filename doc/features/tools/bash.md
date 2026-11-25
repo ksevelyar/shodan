@@ -10,8 +10,8 @@
 
 ### 1. User runs a command
 
-* User asks Shodan to run `echo hello from bash` using the bash tool.
-* User sees the command request and its result, `hello from bash`, in the conversation.
+* User asks Shodan to run `echo hello` using the bash tool.
+* User sees the command request and its result, `hello`, in the conversation.
 * Model responds using the command output.
 
 ### 2. User is informed when a command fails

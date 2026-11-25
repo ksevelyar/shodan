@@ -2,7 +2,7 @@
 
 ## Requirements
 
-* User can chat with a Llama model in a console session.
+* User can chat with a configured model in a console session.
 * Conversation history is retained during the session.
 * User can scroll conversation history one line at a time with the mouse wheel anywhere in the terminal.
 * User can select text across the interface by dragging the mouse.
