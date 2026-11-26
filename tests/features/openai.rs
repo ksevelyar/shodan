@@ -95,6 +95,17 @@ async fn user_chats_with_default_openai_model() {
     application.send_message("Greet me");
     let request = receive_request(&mut requests).await;
     assert_eq!(request.body["model"], "gpt-6.1-terra");
+    assert_eq!(
+        request.body["instructions"],
+        include_str!("../../AGENTS.md")
+    );
+    let tool_names: Vec<_> = request.body["tools"]
+        .as_array()
+        .expect("tools are present")
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("tool has a name"))
+        .collect();
+    assert_eq!(tool_names, ["bash", "ls", "read"]);
     assert_eq!(request.body["store"], false);
     assert_eq!(request.body["stream"], true);
     assert_eq!(request.body["reasoning"]["effort"], "high");

@@ -178,10 +178,7 @@ async fn user_aborts_model_response() {
     assert_received_messages(
         &second_request,
         &[
-            (
-                "system",
-                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice.",
-            ),
+            ("system", include_str!("../../AGENTS.md")),
             ("user", ASTEROIDS_PLAN_PROMPT),
             ("user", "Continue"),
         ],
@@ -233,10 +230,7 @@ async fn user_sees_failed_request() {
     assert_received_messages(
         &second_request,
         &[
-            (
-                "system",
-                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice.",
-            ),
+            ("system", include_str!("../../AGENTS.md")),
             ("user", ASTEROIDS_PLAN_PROMPT),
             ("user", "Continue"),
         ],
@@ -303,10 +297,7 @@ async fn user_aborts_tool_call_response() {
     assert_received_messages(
         &second_request,
         &[
-            (
-                "system",
-                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice.",
-            ),
+            ("system", include_str!("../../AGENTS.md")),
             ("user", prompt),
             ("user", next_prompt),
         ],
@@ -763,10 +754,7 @@ async fn user_starts_session_and_scrolls_through_long_response() {
     assert_received_messages(
         &request,
         &[
-            (
-                "system",
-                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice.",
-            ),
+            ("system", include_str!("../../AGENTS.md")),
             ("user", ASTEROIDS_PLAN_PROMPT),
         ],
     );

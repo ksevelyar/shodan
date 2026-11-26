@@ -84,7 +84,10 @@ impl Drop for Application {
 
 #[doc = "# Errors\nReturns an error if the provider client cannot be initialized."]
 pub fn build(settings: ApplicationSettings) -> Result<(Application, Events), ApplicationError> {
-    let session = Session::build(settings.provider)?;
+    let mut session = Session::build(settings.provider)?;
+    if matches!(settings.mode, Mode::OpenaiLogin) {
+        session.messages.clear();
+    }
     let (event_sender, background_events) = mpsc::unbounded_channel();
     let application = Application {
         session,
@@ -99,7 +102,7 @@ pub fn build(settings: ApplicationSettings) -> Result<(Application, Events), App
         mode: settings.mode,
         pending_authorization: None,
         input: String::new(),
-        scroll_from_bottom: 0,
+        scroll_from_bottom: usize::MAX,
         maximum_scroll: 0,
         selection: None,
         screen_area: ratatui::layout::Rect::default(),

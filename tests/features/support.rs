@@ -473,7 +473,7 @@ pub fn read_screen(buffer: &Buffer) -> String {
 pub fn read_history(buffer: &Buffer) -> String {
     let width = usize::from(buffer.area.width);
     let height = usize::from(buffer.area.height);
-    buffer.content()[..height.saturating_sub(4) * width]
+    buffer.content()[width..height.saturating_sub(4) * width]
         .iter()
         .map(Cell::symbol)
         .collect()

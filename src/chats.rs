@@ -30,8 +30,8 @@ pub(crate) enum Message {
     FailedResponse(String),
 }
 
-pub(crate) fn build_chat() -> Vec<Message> {
-    vec![Message::System("Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice.".to_owned())]
+pub(crate) fn build_chat(prompt: String) -> Vec<Message> {
+    vec![Message::System(prompt)]
 }
 
 fn append_model_message(application: &mut Application) {
@@ -89,7 +89,8 @@ fn mark_response_aborted(application: &mut Application) {
 }
 
 fn start_response(application: &mut Application, messages: Vec<Message>) {
-    let provider = application.session.provider.clone();
+    let mut provider = application.session.provider.clone();
+    provider.connection.read_context = application.session.get_context_name() == "read";
     let selected_model = application.session.get_selected_model();
     let model = selected_model.name.clone();
     let thinking_level = selected_model.thinking_level;
@@ -128,8 +129,13 @@ fn start_next_tool(application: &mut Application) {
     };
     let turn = application.session.turn;
     let event_sender = application.event_sender.clone();
+    let allowed = application.session.get_context_name() != "read" || call.name != "edit";
     application.active_request = Some(tokio::spawn(async move {
-        let (content, display) = tools::execute(&call.name, &call.arguments).await;
+        let (content, display) = if allowed {
+            tools::execute(&call.name, &call.arguments).await
+        } else {
+            ("Error: tool unavailable in read context".to_owned(), None)
+        };
         let _ = event_sender.send(Event::ToolCompleted {
             turn,
             call_id: call.id,

@@ -112,10 +112,7 @@ async fn user_views_session_statistics() {
     assert_received_messages(
         &request,
         &[
-            (
-                "system",
-                "Answer directly and accurately using the fewest words needed. For practical requests, give specific, actionable steps. Omit introductions, summaries, repetition, and unsolicited advice.",
-            ),
+            ("system", include_str!("../../AGENTS.md")),
             ("user", ASTEROIDS_PLAN_PROMPT),
         ],
     );

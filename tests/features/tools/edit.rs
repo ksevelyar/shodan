@@ -21,8 +21,16 @@ async fn run_edit_scenario(
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
     let mut application = run_test_application(settings);
+    application.press_key(crossterm::event::KeyCode::Tab);
     application.send_message(prompt);
     let request = receive_request(&mut requests).await;
+    assert_eq!(
+        request.body["tools"]
+            .as_array()
+            .expect("tools are present")
+            .len(),
+        4
+    );
     let recording_directory = Path::new("tests/features/fixtures/openai/tools").join(scenario);
     let response = fs::read_to_string(recording_directory.join("response-1.txt"))
         .expect("the recorded tool call exists");

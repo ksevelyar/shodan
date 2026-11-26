@@ -92,6 +92,7 @@ pub(crate) struct ProviderConnection {
     proxy: Option<reqwest::Url>,
     record: bool,
     provider_name: &'static str,
+    pub(crate) read_context: bool,
 }
 
 #[derive(Clone)]
@@ -129,6 +130,7 @@ pub(crate) fn build(settings: ProviderSettings) -> Result<Provider, ApplicationE
         proxy: settings.proxy,
         record: settings.record,
         provider_name: settings.selection.get_name(),
+        read_context: true,
     };
     let kind = match settings.selection {
         ProviderSelection::Llama { address } => ProviderKind::Llama { address },

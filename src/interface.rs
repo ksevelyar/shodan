@@ -195,6 +195,7 @@ pub(crate) fn restore_terminal<BackendType: Backend, EventSource>(
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 enum SelectionRow {
+    Top,
     Conversation(usize),
     Panel(u16),
 }
@@ -328,6 +329,13 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
             application.input.pop();
         }
         KeyCode::Esc => abort_response(application),
+        KeyCode::Tab if !matches!(application.mode, crate::settings::Mode::OpenaiLogin) => {
+            abort_response(application);
+            application.session.cycle_context();
+            application.scroll_from_bottom = usize::MAX;
+            application.selection = None;
+            application.error = None;
+        }
         KeyCode::Enter
             if application.pending_authorization.is_some()
                 && !application.input.trim().is_empty() =>
@@ -364,14 +372,16 @@ fn get_selection_position(
         return None;
     }
     let row = mouse.row.clamp(area.y, area.bottom() - 1) - area.y;
-    let conversation_height = area.height.saturating_sub(4);
-    let selection_row = if row < conversation_height {
+    let conversation_height = area.height.saturating_sub(5);
+    let selection_row = if row == 0 {
+        SelectionRow::Top
+    } else if row <= conversation_height {
         let viewport_start = application
             .maximum_scroll
             .saturating_sub(application.scroll_from_bottom);
-        SelectionRow::Conversation(viewport_start + usize::from(row))
+        SelectionRow::Conversation(viewport_start + usize::from(row - 1))
     } else {
-        SelectionRow::Panel(row - conversation_height)
+        SelectionRow::Panel(row - conversation_height - 1)
     };
     Some(SelectionPosition {
         row: selection_row,
@@ -455,13 +465,13 @@ pub(crate) fn advance_selection_scroll(application: &mut Application) {
         return;
     };
     let area = application.screen_area;
-    let conversation_height = area.height.saturating_sub(4);
+    let conversation_height = area.height.saturating_sub(5);
     if conversation_height == 0 {
         return;
     }
-    if mouse.row <= area.y {
+    if mouse.row <= area.y + 1 {
         scroll_up(application, 1);
-    } else if mouse.row == area.y + conversation_height - 1 {
+    } else if mouse.row == area.y + conversation_height {
         scroll_down(application, 1);
     } else {
         return;
@@ -483,14 +493,16 @@ fn draw_selection(
     let start = active_selection.anchor.min(active_selection.focus);
     let end = active_selection.anchor.max(active_selection.focus);
     let area = frame.area();
-    let conversation_height = area.height.saturating_sub(4);
+    let conversation_height = area.height.saturating_sub(5);
     let buffer = frame.buffer_mut();
     let mut positions = Vec::new();
     for row in 0..area.height {
-        let selection_row = if row < conversation_height {
-            SelectionRow::Conversation(viewport_start + usize::from(row))
+        let selection_row = if row == 0 {
+            SelectionRow::Top
+        } else if row <= conversation_height {
+            SelectionRow::Conversation(viewport_start + usize::from(row - 1))
         } else {
-            SelectionRow::Panel(row - conversation_height)
+            SelectionRow::Panel(row - conversation_height - 1)
         };
         for column in 0..area.width {
             let position = SelectionPosition {
@@ -786,7 +798,7 @@ fn format_messages(messages: &[Message], width: usize) -> Vec<Line<'static>> {
             continue;
         }
         let (sections, user, aborted) = match message {
-            Message::System(_) => continue,
+            Message::System(content) => (vec![(content.clone(), Style::default())], false, false),
             Message::User(content) => (vec![(content.clone(), Style::default())], true, false),
             Message::FailedResponse(content) => {
                 (vec![(content.clone(), Style::default())], false, false)
@@ -855,8 +867,13 @@ fn format_messages(messages: &[Message], width: usize) -> Vec<Line<'static>> {
 fn draw_interface(frame: &mut Frame<'_>, application: &mut Application) {
     let input = application.input.as_str();
     let statistics = &application.statistics;
-    let scroll_from_bottom = application.scroll_from_bottom;
+    let scroll_from_bottom = &mut application.scroll_from_bottom;
     let maximum_scroll = &mut application.maximum_scroll;
+    let panels = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(frame.area());
+    frame.render_widget(
+        Paragraph::new(application.session.get_context_name()),
+        panels[0],
+    );
     let areas = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(1),
@@ -864,7 +881,7 @@ fn draw_interface(frame: &mut Frame<'_>, application: &mut Application) {
         Constraint::Length(1),
         Constraint::Length(1),
     ])
-    .split(frame.area());
+    .split(panels[1]);
     let width = usize::from(areas[0].width).max(1);
     let mut lines = format_messages(&application.session.messages, width);
     if let Some(error) = &application.error {
@@ -876,7 +893,8 @@ fn draw_interface(frame: &mut Frame<'_>, application: &mut Application) {
     }
     let height = usize::from(areas[0].height);
     *maximum_scroll = lines.len().saturating_sub(height);
-    let start = maximum_scroll.saturating_sub(scroll_from_bottom.min(*maximum_scroll));
+    *scroll_from_bottom = (*scroll_from_bottom).min(*maximum_scroll);
+    let start = maximum_scroll.saturating_sub(*scroll_from_bottom);
     let visible = lines
         .into_iter()
         .skip(start)

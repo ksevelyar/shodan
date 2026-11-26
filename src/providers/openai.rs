@@ -254,8 +254,8 @@ fn build_input(messages: &[Message]) -> (String, Vec<Value>) {
     (instructions, input)
 }
 
-fn describe_openai_tools() -> Vec<Value> {
-    crate::tools::describe_tools().into_iter().map(|tool| {
+fn describe_openai_tools(read_context: bool) -> Vec<Value> {
+    crate::tools::describe_tools(read_context).into_iter().map(|tool| {
         let function = &tool["function"];
         json!({"type": "function", "name": function["name"], "description": function["description"], "parameters": function["parameters"], "strict": false})
     }).collect()
@@ -333,7 +333,7 @@ pub(crate) async fn stream_response(
         .await?;
         let (instructions, input) = build_input(messages);
         let mut request = json!({"model": model, "instructions": instructions, "input": input,
-            "tools": describe_openai_tools(), "store": false, "stream": true,
+            "tools": describe_openai_tools(connection.read_context), "store": false, "stream": true,
             "include": ["reasoning.encrypted_content"]});
         if let Some(thinking_level) = thinking_level {
             request["reasoning"] =

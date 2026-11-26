@@ -113,7 +113,7 @@ async fn post_messages(
             Message::ToolResult { call_id, content, .. } => Some(serde_json::json!({"role":"tool", "tool_call_id":call_id, "content":content})),
         })
         .collect::<Vec<_>>();
-    let mut request = serde_json::json!({"model": model, "messages": messages, "tools": tools::describe_tools(), "stream": true, "stream_options": {"include_usage": true}});
+    let mut request = serde_json::json!({"model": model, "messages": messages, "tools": tools::describe_tools(connection.read_context), "stream": true, "stream_options": {"include_usage": true}});
     if let Some(thinking_level) = thinking_level {
         request["reasoning_effort"] = serde_json::json!(thinking_level.as_provider_value());
     }

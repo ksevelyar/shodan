@@ -77,13 +77,17 @@ struct FileArguments {
     limit: Option<usize>,
 }
 
-pub(crate) fn describe_tools() -> Vec<Value> {
-    vec![
+pub(crate) fn describe_tools(read_context: bool) -> Vec<Value> {
+    let mut tools = vec![
         json!({"type":"function","function":{"name":"edit","description":"Edit one existing file with exact, unique, non-overlapping replacements matched against the original file. Include all changes to the file in one call.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path"},"edits":{"type":"array","minItems":1,"items":{"type":"object","properties":{"oldText":{"type":"string","description":"Nonempty text to replace, unique in the original file"},"newText":{"type":"string","description":"Replacement text"}},"required":["oldText","newText"]}}},"required":["path","edits"]}}}),
         json!({"type":"function","function":{"name":"bash","description":"Run a bash command","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Command to run"}},"required":["command"]}}}),
         json!({"type":"function","function":{"name":"ls","description":"list directory content","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Directory path"}},"required":["path"]}}}),
         json!({"type":"function","function":{"name":"read","description":"Read a text file","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path"},"offset":{"type":"integer","description":"First line, starting at 1"},"limit":{"type":"integer","description":"Maximum number of lines"}},"required":["path"]}}}),
-    ]
+    ];
+    if read_context {
+        tools.retain(|tool| tool["function"]["name"] != "edit");
+    }
+    tools
 }
 
 pub(crate) async fn execute(name: &str, arguments: &str) -> (String, Option<ToolDisplay>) {

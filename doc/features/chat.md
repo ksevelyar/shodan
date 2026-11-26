@@ -13,7 +13,6 @@
 * Conversation messages appear without role labels.
 * User messages have a dark grey background.
 * Light grey lines separate the message input from the conversation and status panel.
-* User can choose a system prompt when starting a session. The default prompt is short.
 * User can end a session with an exit command, end of input, or Ctrl-C.
 
 ## User scenarios
