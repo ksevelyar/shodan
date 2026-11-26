@@ -114,4 +114,6 @@ fn fibonacci(number: u32) -> u64 {
 * Each `oldText` must match exactly one region of the original file. All regions must be disjoint.
 * All replacements are validated against the original file before changes are written.
 * On success, the result includes a syntax-highlighted diff with removed and added lines numbered according to the original and updated file respectively.
+* Diff lines use `-` for removals, `+` for additions and a space for unchanged context. Unchanged context uses original line numbers.
+* The diff includes up to three unchanged lines around each change. Nearby changes share context.
 * On failure, the result explains the error.

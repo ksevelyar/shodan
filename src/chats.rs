@@ -25,7 +25,7 @@ pub(crate) enum Message {
     ToolResult {
         call_id: String,
         content: String,
-        display: Option<tools::ReadDisplay>,
+        display: Option<tools::ToolDisplay>,
     },
     FailedResponse(String),
 }

@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 pub async fn run_bash_command(command: &str) -> Result<String, ApplicationError> {
     bash::run_command(command)
         .await
+        .map(|(output, _)| output)
         .map_err(|error| ApplicationError::Tool(format!("Failed to run bash command: {error}")))
 }
 
@@ -48,6 +49,12 @@ struct DirectoryArguments {
 }
 
 #[derive(Clone)]
+pub enum ToolDisplay {
+    Read(ReadDisplay),
+    Bash { successful: bool },
+}
+
+#[derive(Clone)]
 pub struct ReadDisplay {
     pub path: String,
     pub offset: usize,
@@ -69,7 +76,7 @@ pub(crate) fn describe_tools() -> Vec<Value> {
     ]
 }
 
-pub(crate) async fn execute(name: &str, arguments: &str) -> (String, Option<ReadDisplay>) {
+pub(crate) async fn execute(name: &str, arguments: &str) -> (String, Option<ToolDisplay>) {
     if name == "read" {
         return match serde_json::from_str::<FileArguments>(arguments) {
             Ok(arguments) => match read::read_file_with_context(
@@ -81,11 +88,11 @@ pub(crate) async fn execute(name: &str, arguments: &str) -> (String, Option<Read
             {
                 Ok((content, preceding_content)) => (
                     content,
-                    Some(ReadDisplay {
+                    Some(ToolDisplay::Read(ReadDisplay {
                         path: arguments.path,
                         offset: arguments.offset.unwrap_or(1),
                         preceding_content,
-                    }),
+                    })),
                 ),
                 Err(error) => (
                     format!(
@@ -98,13 +105,22 @@ pub(crate) async fn execute(name: &str, arguments: &str) -> (String, Option<Read
             Err(error) => (format!("Error: {error}"), None),
         };
     }
-    let result = match name {
-        "bash" => match serde_json::from_str::<CommandArguments>(arguments) {
-            Ok(arguments) => run_bash_command(&arguments.command)
+    if name == "bash" {
+        let result = match serde_json::from_str::<CommandArguments>(arguments) {
+            Ok(arguments) => bash::run_command(&arguments.command)
                 .await
-                .map_err(|error| error.to_string()),
+                .map_err(|error| format!("tool: Failed to run bash command: {error}")),
             Err(error) => Err(error.to_string()),
-        },
+        };
+        return match result {
+            Ok((output, successful)) => (output, Some(ToolDisplay::Bash { successful })),
+            Err(error) => (
+                format!("Error: {error}"),
+                Some(ToolDisplay::Bash { successful: false }),
+            ),
+        };
+    }
+    let result = match name {
         "ls" => match serde_json::from_str::<DirectoryArguments>(arguments) {
             Ok(arguments) => list_directory(Path::new(&arguments.path))
                 .await

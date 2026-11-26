@@ -24,7 +24,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::{
     application::{Application, ApplicationError, Statistics},
     chats::{Message, ToolCall, abort_response, send_message},
-    tools::ReadDisplay,
+    tools::{ReadDisplay, ToolDisplay},
 };
 
 pub(crate) async fn copy_to_clipboard(text: &str, command: Option<&[String]>) -> bool {
@@ -68,6 +68,7 @@ enum Palette {
     Grey,
     ThinkingGrey,
     Lavender,
+    Red,
     Pink,
 }
 
@@ -78,6 +79,7 @@ impl From<Palette> for Color {
             Palette::Grey => Self::Gray,
             Palette::ThinkingGrey => Self::Rgb(128, 128, 128),
             Palette::Lavender => Self::Rgb(84, 70, 125),
+            Palette::Red => Self::Rgb(125, 48, 48),
             Palette::Pink => Self::Rgb(255, 16, 240),
         }
     }
@@ -552,13 +554,7 @@ fn format_model_message(
     if !content.is_empty() {
         sections.push((content.to_owned(), Style::default()));
     }
-    for call in tool_calls {
-        sections.push((
-            format!("{} {}", call.name, call.arguments),
-            Style::default().bg(Color::from(Palette::Lavender)),
-        ));
-    }
-    if sections.is_empty() {
+    if sections.is_empty() && tool_calls.is_empty() {
         sections.push((String::new(), Style::default()));
     }
     sections
@@ -595,6 +591,60 @@ fn wrap_message_section(
             };
             lines.push(Line::from(line).style(line_style));
         }
+    }
+    lines
+}
+
+fn format_bash_command(command: &str, background: Color, width: usize) -> Vec<Line<'static>> {
+    static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
+    static THEMES: OnceLock<ThemeSet> = OnceLock::new();
+    let syntaxes = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
+    let themes = THEMES.get_or_init(ThemeSet::load_defaults);
+    let syntax = syntaxes
+        .find_syntax_by_extension("sh")
+        .expect("Bash syntax is available");
+    let mut highlighter = HighlightLines::new(syntax, &themes.themes["base16-ocean.dark"]);
+    let mut lines = Vec::new();
+    let mut spans = vec![Span::styled("$ ", Style::default().bg(background))];
+    let mut used_width = 2;
+    for line in command.split_inclusive('\n') {
+        let segments = highlighter
+            .highlight_line(line, syntaxes)
+            .unwrap_or_else(|_| vec![(syntect::highlighting::Style::default(), line)]);
+        for (style, text) in segments {
+            let foreground = Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
+            let mut fragment = String::new();
+            for character in text.chars() {
+                let character_width = character.width().unwrap_or(0);
+                if character == '\n' || (used_width + character_width > width && used_width > 0) {
+                    if !fragment.is_empty() {
+                        spans.push(Span::styled(
+                            std::mem::take(&mut fragment),
+                            Style::default().fg(foreground).bg(background),
+                        ));
+                    }
+                    lines.push(
+                        Line::from(std::mem::take(&mut spans))
+                            .style(Style::default().bg(background)),
+                    );
+                    used_width = 0;
+                    if character == '\n' {
+                        continue;
+                    }
+                }
+                fragment.push(character);
+                used_width += character_width;
+            }
+            if !fragment.is_empty() {
+                spans.push(Span::styled(
+                    fragment,
+                    Style::default().fg(foreground).bg(background),
+                ));
+            }
+        }
+    }
+    if !spans.is_empty() {
+        lines.push(Line::from(spans).style(Style::default().bg(background)));
     }
     lines
 }
@@ -667,12 +717,56 @@ fn format_read_result(content: &str, display: &ReadDisplay, width: usize) -> Vec
     output
 }
 
+fn format_tool_calls(
+    tool_calls: &[ToolCall],
+    messages: &[Message],
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for call in tool_calls {
+        let background = messages
+            .iter()
+            .find_map(|message| match message {
+                Message::ToolResult {
+                    call_id,
+                    display: Some(ToolDisplay::Bash { successful }),
+                    ..
+                } if call_id == &call.id => Some(Color::from(if *successful {
+                    Palette::Lavender
+                } else {
+                    Palette::Red
+                })),
+                _ => None,
+            })
+            .unwrap_or_else(|| Color::from(Palette::Lavender));
+        let command = if call.name == "bash" {
+            serde_json::from_str::<serde_json::Value>(&call.arguments)
+                .ok()
+                .and_then(|arguments| arguments["command"].as_str().map(str::to_owned))
+        } else {
+            None
+        };
+        if let Some(command) = command {
+            lines.extend(format_bash_command(&command, background, width));
+        } else {
+            let content = format!("{} {}", call.name, call.arguments);
+            lines.extend(wrap_message_section(
+                &content,
+                Style::default().bg(background),
+                false,
+                width,
+            ));
+        }
+    }
+    lines
+}
+
 fn format_messages(messages: &[Message], width: usize) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for message in messages {
         if let Message::ToolResult {
             content,
-            display: Some(display),
+            display: Some(ToolDisplay::Read(display)),
             ..
         } = message
         {
@@ -685,6 +779,25 @@ fn format_messages(messages: &[Message], width: usize) -> Vec<Line<'static>> {
             Message::User(content) => (vec![(content.clone(), Style::default())], true, false),
             Message::FailedResponse(content) => {
                 (vec![(content.clone(), Style::default())], false, false)
+            }
+            Message::ToolResult {
+                content,
+                display: Some(ToolDisplay::Bash { successful }),
+                ..
+            } => {
+                let background = Color::from(if *successful {
+                    Palette::Lavender
+                } else {
+                    Palette::Red
+                });
+                (
+                    vec![(
+                        content.trim_end_matches('\n').to_owned(),
+                        Style::default().bg(background),
+                    )],
+                    false,
+                    false,
+                )
             }
             Message::ToolResult { content, .. } => (
                 vec![(
@@ -709,6 +822,9 @@ fn format_messages(messages: &[Message], width: usize) -> Vec<Line<'static>> {
         for (content, style) in sections {
             lines.extend(wrap_message_section(&content, style, user, width));
         }
+        if let Message::Model { tool_calls, .. } = message {
+            lines.extend(format_tool_calls(tool_calls, messages, width));
+        }
         if aborted {
             for line in textwrap::wrap("Request was aborted", width) {
                 lines.push(
@@ -717,7 +833,10 @@ fn format_messages(messages: &[Message], width: usize) -> Vec<Line<'static>> {
                 );
             }
         }
-        lines.push(Line::default());
+        if !matches!(message, Message::Model { tool_calls, .. } if tool_calls.len() == 1 && tool_calls[0].name == "bash")
+        {
+            lines.push(Line::default());
+        }
     }
     lines
 }

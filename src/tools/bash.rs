@@ -7,7 +7,7 @@ use tokio::{
 
 const OUTPUT_LIMIT: usize = 50 * 1024;
 
-pub(super) async fn run_command(command: &str) -> io::Result<String> {
+pub(super) async fn run_command(command: &str) -> io::Result<(String, bool)> {
     let mut child = Command::new("bash")
         .arg("-c")
         .arg(command)
@@ -45,7 +45,7 @@ pub(super) async fn run_command(command: &str) -> io::Result<String> {
         output.push_str("\nCommand failed with ");
         output.push_str(&exit_description);
     }
-    Ok(output)
+    Ok((output, status.success()))
 }
 
 async fn read_limited(

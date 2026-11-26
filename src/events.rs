@@ -41,7 +41,7 @@ pub enum Event {
         turn: u64,
         call_id: String,
         content: String,
-        display: Option<crate::tools::ReadDisplay>,
+        display: Option<crate::tools::ToolDisplay>,
     },
     RequestFailed {
         turn: u64,

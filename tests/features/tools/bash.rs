@@ -87,9 +87,36 @@ async fn user_runs_command() {
         .send_message("Run the command echo hello using the bash tool. Show the exact output.");
     receive_request_or_error(&mut requests, &mut application).await;
     application
-        .wait_for_screen(|screen| read_history(screen).contains("bash"))
+        .wait_for_screen(|screen| read_history(screen).contains("$ echo hello"))
         .await;
     let second_request = receive_request_or_error(&mut requests, &mut application).await;
+    let screen = application
+        .wait_for_screen(|screen| {
+            let history = read_history(screen);
+            history.contains("$ echo hello") && history.matches("hello").count() >= 3
+        })
+        .await;
+    let command_row = (0..screen.area.height)
+        .find(|row| {
+            (0..screen.area.width)
+                .map(|column| screen[(column, *row)].symbol())
+                .collect::<String>()
+                .starts_with("$ echo hello")
+        })
+        .expect("the command is visible");
+    assert_eq!(
+        screen[(0, command_row)].bg,
+        ratatui::style::Color::Rgb(84, 70, 125)
+    );
+    assert_eq!(
+        screen[(0, command_row + 1)].bg,
+        ratatui::style::Color::Rgb(84, 70, 125)
+    );
+    let output = (0..screen.area.width)
+        .map(|column| screen[(column, command_row + 1)].symbol())
+        .collect::<String>();
+    assert_eq!(output.trim(), "hello");
+    assert_ne!(screen[(2, command_row)].fg, screen[(7, command_row)].fg);
     let messages = second_request.body["messages"]
         .as_array()
         .expect("the conversation is an array");
@@ -168,9 +195,36 @@ async fn user_is_informed_when_command_fails() {
         .send_message("Run the command exit 3 using the bash tool and report what happened.");
     receive_request_or_error(&mut requests, &mut application).await;
     application
-        .wait_for_screen(|screen| read_history(screen).contains("bash"))
+        .wait_for_screen(|screen| read_history(screen).contains("$ exit 3"))
         .await;
     let second_request = receive_request_or_error(&mut requests, &mut application).await;
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen).contains("Command failed with exit code 3"))
+        .await;
+    let command_row = (0..screen.area.height)
+        .find(|row| {
+            (0..screen.area.width)
+                .map(|column| screen[(column, *row)].symbol())
+                .collect::<String>()
+                .starts_with("$ exit 3")
+        })
+        .expect("the command is visible");
+    assert_eq!(
+        screen[(0, command_row)].bg,
+        ratatui::style::Color::Rgb(125, 48, 48)
+    );
+    let failure_row = (command_row + 1..screen.area.height)
+        .find(|row| {
+            (0..screen.area.width)
+                .map(|column| screen[(column, *row)].symbol())
+                .collect::<String>()
+                .contains("Command failed with exit code 3")
+        })
+        .expect("the failure is visible");
+    assert_eq!(
+        screen[(0, failure_row)].bg,
+        ratatui::style::Color::Rgb(125, 48, 48)
+    );
     let messages = second_request.body["messages"]
         .as_array()
         .expect("the conversation is an array");

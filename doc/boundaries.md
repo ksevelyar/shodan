@@ -1,6 +1,3 @@
-## Design
-* economy of complexity is main goal, each moving part should be justified
-
 ## Documentation
 * Requirements must not include implementation details.
 * User scenarios describe what the application does, not what is absent.
@@ -13,6 +10,6 @@
 * Provider mocks must use responses recorded from real providers.
 * Only feature tests allowed
 * Tests verify what the application does, not what is absent.
-* Flow for adding feature is to add requirements, write user scenarios for this requirements, then add feature tests for these scenarios
+* add requirements and write user scenarios for this requirements before implementation, prefer TDD
 * Every feature test corresponds to one user scenario.
 * Name every feature test after its user scenario in snake case, omitting articles. `A user creates a chain` becomes `user_creates_chain`.
