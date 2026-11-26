@@ -58,9 +58,25 @@ async fn user_runs_command() {
         )
         .start()
         .await;
-    let home = create_home(
-        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}, {"name": "Qwen3.8-27B-UD-IQ4_XS", "thinking_level": "low"}]}}}),
-    );
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    },
+                    {
+                        "name": "Qwen3.8-27B-UD-IQ4_XS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
     let mut application = run_test_application(settings);
@@ -123,9 +139,25 @@ async fn user_is_informed_when_command_fails() {
         )
         .start()
         .await;
-    let home = create_home(
-        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}, {"name": "Qwen3.8-27B-UD-IQ4_XS", "thinking_level": "low"}]}}}),
-    );
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    },
+                    {
+                        "name": "Qwen3.8-27B-UD-IQ4_XS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
     let mut application = run_test_application(settings);
@@ -172,9 +204,25 @@ async fn user_aborts_running_command() {
         )
         .start()
         .await;
-    let home = create_home(
-        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}, {"name": "Qwen3.8-27B-UD-IQ4_XS", "thinking_level": "low"}]}}}),
-    );
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    },
+                    {
+                        "name": "Qwen3.8-27B-UD-IQ4_XS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
     let mut application = run_test_application(settings);

@@ -17,7 +17,6 @@ use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
@@ -854,7 +853,8 @@ pub(crate) async fn perform_login(
     let identifier =
         crate::settings::get_device_identifier(&directory).map_err(|error| error.to_string())?;
     let verifier = generate_random_value();
-    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    let verifier_digest = ring::digest::digest(&ring::digest::SHA256, verifier.as_bytes());
+    let challenge = URL_SAFE_NO_PAD.encode(verifier_digest.as_ref());
     let state = generate_random_value();
     let nonce = generate_random_value();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:1455")

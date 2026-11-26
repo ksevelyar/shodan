@@ -17,9 +17,21 @@ async fn send_recorded_chat_response(request: &CapturedRequest, fixture_name: &s
 #[tokio::test]
 async fn user_chats_with_inkling_at_its_configured_thinking_level() {
     let (address, mut requests) = RecordedLlama::new().start().await;
-    let home = create_home(
-        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}]}}}),
-    );
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
     let mut application = run_test_application(settings);
@@ -39,9 +51,25 @@ async fn user_chats_with_inkling_at_its_configured_thinking_level() {
 #[tokio::test]
 async fn user_cycles_through_configured_models() {
     let (address, mut requests) = RecordedLlama::new().start().await;
-    let home = create_home(
-        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}, {"name": "Qwen3.8-27B-UD-IQ4_XS", "thinking_level": "low"}]}}}),
-    );
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    },
+                    {
+                        "name": "Qwen3.8-27B-UD-IQ4_XS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
     let mut application = run_test_application(settings);

@@ -28,7 +28,22 @@ async fn user_starts_with_existing_settings() {
     let directory = home_directory.join(".shodan");
     std::fs::create_dir_all(&directory).expect("the settings directory can be created");
     let address = "http://127.0.0.1:8080";
-    let settings = serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}]}}}).to_string();
+    let settings = serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    })
+    .to_string();
     let path = directory.join("settings.json");
     std::fs::write(&path, &settings).expect("the settings can be written");
     let mut application = run_test_application(

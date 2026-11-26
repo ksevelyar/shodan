@@ -11,9 +11,25 @@ use shodan::settings::build_settings;
 #[tokio::test]
 async fn user_views_rounded_cache_hits() {
     let (server_address, mut requests) = RecordedLlama::new().start().await;
-    let home = create_home(
-        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}, {"name": "Qwen3.8-27B-UD-IQ4_XS", "thinking_level": "low"}]}}}),
-    );
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": server_address,
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    },
+                    {
+                        "name": "Qwen3.8-27B-UD-IQ4_XS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
     let mut application = run_test_application(settings);
@@ -39,9 +55,21 @@ async fn user_views_rounded_cache_hits() {
 #[tokio::test]
 async fn user_views_thinking_level() {
     let server_address = "http://127.0.0.1:8080";
-    let home = create_home(
-        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "Qwen3.8-27B-UD-IQ4_XS", "models": [{"name": "Qwen3.8-27B-UD-IQ4_XS", "thinking_level": "low"}]}}}),
-    );
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": server_address,
+                "default_model": "Qwen3.8-27B-UD-IQ4_XS",
+                "models": [
+                    {
+                        "name": "Qwen3.8-27B-UD-IQ4_XS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
     let mut application = run_test_application(settings);
@@ -55,9 +83,23 @@ async fn user_views_thinking_level() {
 #[tokio::test]
 async fn user_views_session_statistics() {
     let (server_address, mut requests) = RecordedLlama::new().start().await;
-    let home = create_home(
-        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "LFM3-Omni-2B-Q4_K_M", "models": [{"name": "LFM3-Omni-2B-Q4_K_M"}, {"name": "MiniCPM5-2B-Q4_K_M"}]}}}),
-    );
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": server_address,
+                "default_model": "LFM3-Omni-2B-Q4_K_M",
+                "models": [
+                    {
+                        "name": "LFM3-Omni-2B-Q4_K_M"
+                    },
+                    {
+                        "name": "MiniCPM5-2B-Q4_K_M"
+                    }
+                ]
+            }
+        }
+    }));
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
     let mut application = run_test_application(settings);
@@ -94,9 +136,23 @@ async fn user_views_session_statistics() {
 #[tokio::test]
 async fn user_scrolls_conversation() {
     let (server_address, mut requests) = RecordedLlama::new().start().await;
-    let home = create_home(
-        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "LFM3-Omni-2B-Q4_K_M", "models": [{"name": "LFM3-Omni-2B-Q4_K_M"}, {"name": "MiniCPM5-2B-Q4_K_M"}]}}}),
-    );
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": server_address,
+                "default_model": "LFM3-Omni-2B-Q4_K_M",
+                "models": [
+                    {
+                        "name": "LFM3-Omni-2B-Q4_K_M"
+                    },
+                    {
+                        "name": "MiniCPM5-2B-Q4_K_M"
+                    }
+                ]
+            }
+        }
+    }));
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
     let mut application = run_test_application(settings);
@@ -122,9 +178,23 @@ async fn user_scrolls_conversation() {
 #[tokio::test]
 async fn user_views_response_time() {
     let (server_address, mut requests) = RecordedLlama::new().start().await;
-    let home = create_home(
-        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "LFM3-Omni-2B-Q4_K_M", "models": [{"name": "LFM3-Omni-2B-Q4_K_M"}, {"name": "MiniCPM5-2B-Q4_K_M"}]}}}),
-    );
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": server_address,
+                "default_model": "LFM3-Omni-2B-Q4_K_M",
+                "models": [
+                    {
+                        "name": "LFM3-Omni-2B-Q4_K_M"
+                    },
+                    {
+                        "name": "MiniCPM5-2B-Q4_K_M"
+                    }
+                ]
+            }
+        }
+    }));
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
     let mut application = run_test_application(settings);

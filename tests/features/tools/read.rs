@@ -20,7 +20,11 @@ async fn user_reads_part_of_file() {
         "user_reads_part_of_file",
         "Read only line 2 of tests/features/fixtures/tools/user_reads_part_of_file/lines.txt using the read tool with offset 2 and limit 1. Show the exact line.",
         "read",
-        serde_json::json!({"path":"tests/features/fixtures/tools/user_reads_part_of_file/lines.txt","offset":2,"limit":1}),
+        serde_json::json!({
+            "path": "tests/features/fixtures/tools/user_reads_part_of_file/lines.txt",
+            "offset": 2,
+            "limit": 1
+        }),
         &["Second line"],
         Some("Second line\n"),
         &["Line 2 is:", "Second line"],
