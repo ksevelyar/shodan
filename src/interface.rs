@@ -1,3 +1,5 @@
+mod edit;
+
 use std::{io, ops::ControlFlow, path::Path, sync::OnceLock};
 
 use crossterm::{
@@ -764,6 +766,15 @@ fn format_tool_calls(
 fn format_messages(messages: &[Message], width: usize) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for message in messages {
+        if let Message::ToolResult {
+            display: Some(ToolDisplay::Edit(display)),
+            ..
+        } = message
+        {
+            lines.extend(edit::format_edit_result(display, width));
+            lines.push(Line::default());
+            continue;
+        }
         if let Message::ToolResult {
             content,
             display: Some(ToolDisplay::Read(display)),

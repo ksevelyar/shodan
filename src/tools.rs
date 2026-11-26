@@ -1,4 +1,5 @@
 mod bash;
+mod edit;
 mod ls;
 mod read;
 
@@ -51,7 +52,15 @@ struct DirectoryArguments {
 #[derive(Clone)]
 pub enum ToolDisplay {
     Read(ReadDisplay),
+    Edit(EditDisplay),
     Bash { successful: bool },
+}
+
+#[derive(Clone)]
+pub struct EditDisplay {
+    pub path: String,
+    pub original: String,
+    pub updated: String,
 }
 
 #[derive(Clone)]
@@ -70,6 +79,7 @@ struct FileArguments {
 
 pub(crate) fn describe_tools() -> Vec<Value> {
     vec![
+        json!({"type":"function","function":{"name":"edit","description":"Edit one existing file with exact, unique, non-overlapping replacements matched against the original file. Include all changes to the file in one call.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path"},"edits":{"type":"array","minItems":1,"items":{"type":"object","properties":{"oldText":{"type":"string","description":"Nonempty text to replace, unique in the original file"},"newText":{"type":"string","description":"Replacement text"}},"required":["oldText","newText"]}}},"required":["path","edits"]}}}),
         json!({"type":"function","function":{"name":"bash","description":"Run a bash command","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Command to run"}},"required":["command"]}}}),
         json!({"type":"function","function":{"name":"ls","description":"list directory content","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Directory path"}},"required":["path"]}}}),
         json!({"type":"function","function":{"name":"read","description":"Read a text file","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path"},"offset":{"type":"integer","description":"First line, starting at 1"},"limit":{"type":"integer","description":"Maximum number of lines"}},"required":["path"]}}}),
@@ -77,6 +87,25 @@ pub(crate) fn describe_tools() -> Vec<Value> {
 }
 
 pub(crate) async fn execute(name: &str, arguments: &str) -> (String, Option<ToolDisplay>) {
+    if name == "edit" {
+        let result = match serde_json::from_str::<edit::EditArguments>(arguments) {
+            Ok(arguments) => edit::edit_file(arguments).await,
+            Err(error) => Err(error.to_string()),
+        };
+        return match result {
+            Ok(display) => {
+                let diff = similar::TextDiff::from_lines(&display.original, &display.updated)
+                    .unified_diff()
+                    .header(&display.path, &display.path)
+                    .to_string();
+                (
+                    format!("Successfully edited {}.\n{diff}", display.path),
+                    Some(ToolDisplay::Edit(display)),
+                )
+            }
+            Err(error) => (format!("Error: {error}"), None),
+        };
+    }
     if name == "read" {
         return match serde_json::from_str::<FileArguments>(arguments) {
             Ok(arguments) => match read::read_file_with_context(
