@@ -71,6 +71,7 @@ pub struct Application {
     home_directory: std::path::PathBuf,
     pub(crate) mode: Mode,
     pub(crate) pending_authorization: Option<mpsc::UnboundedSender<String>>,
+    pub(crate) clipboard_command: Option<Vec<String>>,
 }
 
 impl Drop for Application {
@@ -94,6 +95,7 @@ pub fn build(settings: ApplicationSettings) -> Result<(Application, Events), App
         response_started: None,
         pending_tool_calls: std::collections::VecDeque::new(),
         home_directory: settings.home_directory,
+        clipboard_command: settings.clipboard_command,
         mode: settings.mode,
         pending_authorization: None,
         input: String::new(),
@@ -172,6 +174,7 @@ where
             let (sender, input) = mpsc::unbounded_channel();
             application.pending_authorization = Some(sender);
             let home_directory = application.home_directory.clone();
+            let clipboard_command = application.clipboard_command.clone();
             let event_sender = application.event_sender.clone();
             let connection = application.session.provider.connection.clone();
             let authentication_address = application
@@ -187,6 +190,7 @@ where
                     &event_sender,
                     &connection,
                     &authentication_address,
+                    clipboard_command.as_deref(),
                 )
                 .await;
                 let event = match result {

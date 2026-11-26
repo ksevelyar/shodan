@@ -17,12 +17,49 @@ use ratatui::{
     text::Line,
     widgets::Paragraph,
 };
+use tokio::io::AsyncWriteExt;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
     application::{Application, ApplicationError, Statistics},
     chats::{Message, ToolCall, abort_response, send_message},
 };
+
+pub(crate) async fn copy_to_clipboard(text: &str, command: Option<&[String]>) -> bool {
+    let automatic_command = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        vec!["wl-copy".to_owned()]
+    } else if std::env::var_os("DISPLAY").is_some() {
+        vec![
+            "xclip".to_owned(),
+            "-selection".to_owned(),
+            "clipboard".to_owned(),
+        ]
+    } else {
+        Vec::new()
+    };
+    let command = command.unwrap_or(&automatic_command);
+    let Some((program, arguments)) = command.split_first() else {
+        return false;
+    };
+    let child = tokio::process::Command::new(program)
+        .args(arguments)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn();
+    let Ok(mut child) = child else {
+        return false;
+    };
+    let Some(mut input) = child.stdin.take() else {
+        return false;
+    };
+    if input.write_all(text.as_bytes()).await.is_err() {
+        return false;
+    }
+    drop(input);
+    matches!(tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await, Ok(Ok(status)) if status.success())
+}
 
 enum Palette {
     DarkGrey,
@@ -168,6 +205,7 @@ pub(crate) struct ScreenSelection {
     dragging: bool,
     drag_pointer: Option<MouseEvent>,
     selected_content: std::collections::BTreeMap<SelectionPosition, String>,
+    copy_pending: bool,
 }
 
 pub(crate) fn draw<BackendType: Backend, EventSource>(
@@ -194,6 +232,20 @@ where
             );
         })
         .map_err(|error| ApplicationError::Terminal(format!("Terminal failed: {error}")))?;
+    if let Some(selection) = application
+        .selection
+        .as_mut()
+        .filter(|selection| selection.copy_pending)
+    {
+        selection.copy_pending = false;
+        let text = get_selected_text(selection);
+        if !text.is_empty() {
+            let clipboard_command = application.clipboard_command.clone();
+            tokio::spawn(async move {
+                copy_to_clipboard(&text, clipboard_command.as_deref()).await;
+            });
+        }
+    }
     Ok(())
 }
 
@@ -329,6 +381,7 @@ fn begin_selection(application: &mut Application, mouse: MouseEvent) {
             dragging: true,
             drag_pointer: None,
             selected_content: std::collections::BTreeMap::new(),
+            copy_pending: false,
         });
 }
 
@@ -345,12 +398,39 @@ fn update_selection(application: &mut Application, mouse: MouseEvent, dragging: 
     };
     selection.focus = position;
     selection.dragging = dragging;
+    selection.copy_pending = !dragging && selection.anchor != selection.focus;
     selection.drag_pointer = dragging.then_some(mouse);
     let start = selection.anchor.min(selection.focus);
     let end = selection.anchor.max(selection.focus);
     selection
         .selected_content
         .retain(|position, _| *position >= start && *position <= end);
+}
+
+fn get_selected_text(selection: &ScreenSelection) -> String {
+    let mut lines = Vec::new();
+    let mut current_row = None;
+    let mut line = String::new();
+    let mut next_column = 0;
+    for (position, content) in &selection.selected_content {
+        if current_row != Some(position.row) {
+            if current_row.is_some() {
+                lines.push(std::mem::take(&mut line));
+            }
+            current_row = Some(position.row);
+            next_column = 0;
+        }
+        if position.column < next_column {
+            continue;
+        }
+        line.push_str(content);
+        let width = u16::try_from(content.width()).unwrap_or(u16::MAX).max(1);
+        next_column = position.column.saturating_add(width);
+    }
+    if current_row.is_some() {
+        lines.push(line);
+    }
+    lines.join("\n")
 }
 
 pub(crate) fn is_selection_dragging(application: &Application) -> bool {
@@ -493,7 +573,9 @@ fn wrap_message_section(
         let wrapped_lines = if line.is_empty() {
             vec![std::borrow::Cow::Borrowed("")]
         } else {
-            textwrap::wrap(line, width)
+            let options =
+                textwrap::Options::new(width).word_splitter(textwrap::WordSplitter::NoHyphenation);
+            textwrap::wrap(line, options)
         };
         for wrapped_line in wrapped_lines {
             let (line, line_style) = if user || style.bg.is_some() {

@@ -7,13 +7,79 @@ use std::{
 use super::support::{
     ASTEROIDS_PLAN_PROMPT, RecordedLlama, assert_received_messages, create_home, read_bottom_line,
     read_history, read_screen, receive_request, receive_request_or_error, run_test_application,
-    send_initial_recorded_response, send_recorded_response, send_remaining_recorded_response,
-    send_response_bytes, wait_for_response_disconnect,
+    run_test_application_with_configured_clipboard, send_initial_recorded_response,
+    send_recorded_response, send_remaining_recorded_response, send_response_bytes,
+    wait_for_response_disconnect,
 };
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use ratatui::style::{Color, Modifier};
 use shodan::settings::build_settings;
+
+#[tokio::test]
+async fn user_copies_selected_text_with_configured_clipboard_command() {
+    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let home = create_home(
+        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}, "clipboard_command": ["sh", "-c", "cat > \"$1\"", "clipboard", "temporary"]}),
+    );
+    let clipboard_path = home.path().join("clipboard");
+    let settings_path = home.path().join(".shodan/settings.json");
+    let mut configuration: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&settings_path).expect("the settings can be read"))
+            .expect("the settings are valid");
+    configuration["clipboard_command"][4] = serde_json::json!(clipboard_path);
+    std::fs::write(settings_path, configuration.to_string()).expect("the settings can be written");
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application_with_configured_clipboard(settings);
+    application.enter_text("clipboard text");
+    application
+        .wait_for_screen(|screen| read_screen(screen).contains("clipboard text"))
+        .await;
+    application.scroll_mouse(MouseEventKind::Down(MouseButton::Left), 0, 21);
+    application.scroll_mouse(MouseEventKind::Drag(MouseButton::Left), 8, 21);
+    application.scroll_mouse(MouseEventKind::Up(MouseButton::Left), 8, 21);
+    let clipboard_timeout = Duration::from_secs(5);
+    tokio::time::timeout(clipboard_timeout, async {
+        loop {
+            if let Ok(text) = std::fs::read_to_string(&clipboard_path)
+                && text == "clipboard"
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the command receives the selected text");
+}
+
+#[tokio::test]
+async fn user_reads_long_hyphenated_text() {
+    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let home = create_home(
+        serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}}),
+    );
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
+    let message = format!(
+        "{}-{}-{}",
+        "a".repeat(110),
+        "b".repeat(130),
+        "c".repeat(110)
+    );
+    application.send_message(&message);
+    application
+        .wait_for_screen(|screen| {
+            let history: String = read_history(screen)
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect();
+            history.contains(&message)
+        })
+        .await;
+}
 
 #[tokio::test]
 async fn user_aborts_model_response() {
