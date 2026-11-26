@@ -370,6 +370,14 @@ pub struct TestApplication {
 }
 
 pub fn run_test_application(settings: ApplicationSettings) -> TestApplication {
+    run_test_application_with_configured_clipboard(
+        settings.with_clipboard_command(vec!["true".to_owned()]),
+    )
+}
+
+pub fn run_test_application_with_configured_clipboard(
+    settings: ApplicationSettings,
+) -> TestApplication {
     let width = 120;
     let height = 24;
     let backend = TestBackend::new(width, height);
@@ -443,7 +451,12 @@ impl TestApplication {
             }
         })
         .await
-        .expect("the application displays the expected screen")
+        .unwrap_or_else(|_| {
+            panic!(
+                "the application displays the expected screen; last screen:\n{}",
+                read_screen(&self.frames.borrow())
+            )
+        })
     }
 }
 

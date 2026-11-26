@@ -18,10 +18,7 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tokio::{
-    io::AsyncWriteExt,
-    sync::{mpsc, oneshot},
-};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     application::ApplicationError,
@@ -590,34 +587,6 @@ async fn handle_callback(
     }
 }
 
-async fn copy_authorization_url(url: &str) -> bool {
-    let (program, arguments): (&str, &[&str]) = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        ("wl-copy", &[])
-    } else if std::env::var_os("DISPLAY").is_some() {
-        ("xclip", &["-selection", "clipboard"])
-    } else {
-        return false;
-    };
-    let child = tokio::process::Command::new(program)
-        .args(arguments)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .spawn();
-    let Ok(mut child) = child else {
-        return false;
-    };
-    let Some(mut input) = child.stdin.take() else {
-        return false;
-    };
-    if input.write_all(url.as_bytes()).await.is_err() {
-        return false;
-    }
-    drop(input);
-    matches!(tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await, Ok(Ok(status)) if status.success())
-}
-
 #[derive(Deserialize, Serialize)]
 struct TokenResponse {
     access_token: String,
@@ -875,6 +844,7 @@ pub(crate) async fn perform_login(
     events: &EventSender,
     connection: &super::ProviderConnection,
     authentication_address: &str,
+    clipboard_command: Option<&[String]>,
 ) -> Result<(), String> {
     let directory = home_directory.join(".shodan");
     let saved_credential = read_credential(&directory.join("openai.json")).ok();
@@ -907,7 +877,7 @@ pub(crate) async fn perform_login(
         &challenge,
         &nonce,
     )?;
-    let copied = copy_authorization_url(&authorization_url).await;
+    let copied = crate::interface::copy_to_clipboard(&authorization_url, clipboard_command).await;
     let mut message = format!(
         "{authorization_url}\n\n│ Complete sign-in on this machine, or paste the redirect URL below and press Enter."
     );

@@ -2,8 +2,46 @@ use shodan::settings::build_settings;
 
 use super::support::{
     LOGIN_PORT, RecordedLlama, TestHome, create_home, read_bottom_line, read_history,
-    receive_request, run_test_application, send_response_bytes,
+    receive_request, run_test_application, run_test_application_with_configured_clipboard,
+    send_response_bytes,
 };
+
+#[tokio::test]
+async fn user_configures_clipboard_command() {
+    let _login_port = LOGIN_PORT.lock().await;
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {"llama": {"address": "http://127.0.0.1:8080", "default_model": "model", "models": [{"name": "model"}]}},
+        "clipboard_command": ["sh", "-c", "cat > \"$1\"", "clipboard", "temporary"]
+    }));
+    let clipboard_path = home.path().join("clipboard");
+    let settings_path = home.path().join(".shodan/settings.json");
+    let mut configuration: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&settings_path).expect("the settings can be read"))
+            .expect("the settings are valid");
+    configuration["clipboard_command"][4] = serde_json::json!(clipboard_path);
+    std::fs::write(settings_path, configuration.to_string()).expect("the settings can be written");
+    let settings = build_settings(
+        home.path().to_owned(),
+        ["login", "openai"].map(str::to_owned),
+    )
+    .expect("the settings can be built");
+    let mut application = run_test_application_with_configured_clipboard(settings);
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen).contains("copied to your clipboard"))
+        .await;
+    let authorization_url = std::fs::read_to_string(clipboard_path)
+        .expect("the command received the authorization URL");
+    let url = reqwest::Url::parse(&authorization_url).expect("the copied URL is valid");
+    assert_eq!(url.host_str(), Some("auth.openai.com"));
+    assert_eq!(
+        url.query_pairs()
+            .find(|(name, _)| name == "state")
+            .expect("the copied URL contains state")
+            .1,
+        get_login_state(&screen)
+    );
+}
 
 fn get_login_state(screen: &ratatui::buffer::Buffer) -> String {
     let history: String = read_history(screen)

@@ -21,4 +21,4 @@ It uses switchable system prompts instead of skills. Users can choose the instru
 * [Models](doc/features/models.md)
 * [Response recording](doc/features/responses-recording.md)
 * [Status panel](doc/features/status-panel.md)
-* [TUI](doc/tui.md)
+* [Interface](doc/features/interface.md)

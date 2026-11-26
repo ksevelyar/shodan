@@ -90,6 +90,7 @@ pub(crate) struct Settings {
     default_provider: String,
     providers: ProvidersConfiguration,
     pub proxy: Option<ProxySettings>,
+    clipboard_command: Option<Vec<String>>,
 }
 
 pub(crate) enum Mode {
@@ -102,6 +103,15 @@ pub struct ApplicationSettings {
     pub(crate) home_directory: PathBuf,
     pub(crate) provider: ProviderSettings,
     pub(crate) mode: Mode,
+    pub(crate) clipboard_command: Option<Vec<String>>,
+}
+
+impl ApplicationSettings {
+    #[must_use]
+    pub fn with_clipboard_command(mut self, command: Vec<String>) -> Self {
+        self.clipboard_command = Some(command);
+        self
+    }
 }
 
 struct ProviderSelection {
@@ -167,6 +177,7 @@ pub fn build_settings(
             record: arguments.record,
         },
         mode,
+        clipboard_command: settings.clipboard_command,
     };
     Session::select_model_position(&application_settings.provider)?;
     Ok(application_settings)
