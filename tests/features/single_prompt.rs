@@ -41,9 +41,21 @@ async fn collect_output(process: Child) -> std::process::Output {
 #[tokio::test]
 async fn user_submits_prompt() {
     let (address, mut requests) = RecordedLlama::new().start().await;
-    let home = create_home(
-        json!({"default_provider":"llama","providers":{"llama":{"address":address,"default_model":"Qwen3.8-27B-UD-IQ4_XS","models":[{"name":"Qwen3.8-27B-UD-IQ4_XS","thinking_level":"low"}]}}}),
-    );
+    let home = create_home(json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Qwen3.8-27B-UD-IQ4_XS",
+                "models": [
+                    {
+                        "name": "Qwen3.8-27B-UD-IQ4_XS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let prompt = "Read tests/features/fixtures/tools/user_reads_file/greeting.txt using the read tool and show its exact contents.";
     let process = start_shodan(home.path(), &["--prompt", prompt]);
     let first_request = receive_request(&mut requests).await;
@@ -82,9 +94,34 @@ async fn user_submits_prompt() {
 #[tokio::test]
 async fn user_selects_provider_and_model() {
     let (address, mut requests) = RecordedLlama::new().start().await;
-    let home = create_home(
-        json!({"default_provider":"openai","providers":{"openai":{"default_model":"openai-model","models":[{"name":"openai-model","thinking_level":"high"}]},"llama":{"address":address,"default_model":"Inkling-2-Mini-UD-IQ3_XXS","models":[{"name":"Inkling-2-Mini-UD-IQ3_XXS","thinking_level":"low"},{"name":"Qwen3.8-27B-UD-IQ4_XS","thinking_level":"low"}]}}}),
-    );
+    let home = create_home(json!({
+        "default_provider": "openai",
+        "providers": {
+            "openai": {
+                "default_model": "openai-model",
+                "models": [
+                    {
+                        "name": "openai-model",
+                        "thinking_level": "high"
+                    }
+                ]
+            },
+            "llama": {
+                "address": address,
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    },
+                    {
+                        "name": "Qwen3.8-27B-UD-IQ4_XS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let process = start_shodan(
         home.path(),
         &[
@@ -135,9 +172,21 @@ async fn user_sees_prompt_error() {
             .expect("the provider receives a connection");
         drop(connection);
     });
-    let home = create_home(
-        json!({"default_provider":"llama","providers":{"llama":{"address":format!("http://{address}"),"default_model":"model","models":[{"name":"model","thinking_level":"low"}]}}}),
-    );
+    let home = create_home(json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": format!("http://{address}"),
+                "default_model": "model",
+                "models": [
+                    {
+                        "name": "model",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let output = collect_output(start_shodan(home.path(), &["--prompt", "Say hello."])).await;
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
@@ -147,9 +196,21 @@ async fn user_sees_prompt_error() {
 
 #[tokio::test]
 async fn user_combines_prompt_with_login() {
-    let home = create_home(
-        json!({"default_provider":"llama","providers":{"llama":{"address":"http://127.0.0.1:8080","default_model":"model","models":[{"name":"model","thinking_level":"low"}]}}}),
-    );
+    let home = create_home(json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": "http://127.0.0.1:8080",
+                "default_model": "model",
+                "models": [
+                    {
+                        "name": "model",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let output = collect_output(start_shodan(
         home.path(),
         &["login", "openai", "--prompt", "hello"],
@@ -166,9 +227,21 @@ async fn user_combines_prompt_with_login() {
 #[tokio::test]
 async fn user_records_prompt() {
     let (address, mut requests) = RecordedLlama::new().start().await;
-    let home = create_home(
-        json!({"default_provider":"llama","providers":{"llama":{"address":address,"default_model":"Qwen3.8-27B-UD-IQ4_XS","models":[{"name":"Qwen3.8-27B-UD-IQ4_XS","thinking_level":"low"}]}}}),
-    );
+    let home = create_home(json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Qwen3.8-27B-UD-IQ4_XS",
+                "models": [
+                    {
+                        "name": "Qwen3.8-27B-UD-IQ4_XS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let process = start_recorded_prompt(home.path());
     let request = receive_request(&mut requests).await;
     send_response_bytes(
@@ -198,9 +271,21 @@ async fn user_records_prompt() {
 #[tokio::test]
 async fn user_sees_response_recording_error() {
     let (address, mut requests) = RecordedLlama::new().start().await;
-    let home = create_home(
-        json!({"default_provider":"llama","providers":{"llama":{"address":address,"default_model":"Qwen3.8-27B-UD-IQ4_XS","models":[{"name":"Qwen3.8-27B-UD-IQ4_XS","thinking_level":"low"}]}}}),
-    );
+    let home = create_home(json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Qwen3.8-27B-UD-IQ4_XS",
+                "models": [
+                    {
+                        "name": "Qwen3.8-27B-UD-IQ4_XS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    }));
     let directory = home.path().join("recordings/llama");
     std::fs::create_dir_all(&directory).expect("the recording directory can be created");
     std::fs::write(directory.join("v1-chat-completions"), "file")

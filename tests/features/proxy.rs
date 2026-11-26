@@ -37,7 +37,27 @@ async fn user_connects_to_local_server_while_openai_uses_proxy() {
     std::fs::create_dir_all(&configuration_directory)
         .expect("the configuration directory can be created");
     let (address, mut requests) = RecordedLlama::new().start().await;
-    let configuration = json!({"proxy": {"url": "socks5h://127.0.0.1:1", "providers": ["openai"]}, "default_provider": "llama", "providers": {"llama": {"address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}]}}});
+    let configuration = json!({
+        "proxy": {
+            "url": "socks5h://127.0.0.1:1",
+            "providers": [
+                "openai"
+            ]
+        },
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    });
     std::fs::write(
         configuration_directory.join("settings.json"),
         configuration.to_string(),
@@ -63,6 +83,49 @@ async fn user_connects_to_local_server_while_openai_uses_proxy() {
     std::fs::remove_dir_all(home_directory).expect("the home directory can be removed");
 }
 
+async fn forward_proxy_connection(
+    mut connection: tokio::net::TcpStream,
+    server_address: std::net::SocketAddr,
+    connections: tokio::sync::mpsc::UnboundedSender<()>,
+) {
+    let mut greeting = [0; 2];
+    connection
+        .read_exact(&mut greeting)
+        .await
+        .expect("the proxy receives a greeting");
+    let mut methods = vec![0; usize::from(greeting[1])];
+    connection
+        .read_exact(&mut methods)
+        .await
+        .expect("the proxy receives authentication methods");
+    connection
+        .write_all(&[5, 0])
+        .await
+        .expect("the proxy accepts unauthenticated connections");
+    let mut request = [0; 10];
+    connection
+        .read_exact(&mut request)
+        .await
+        .expect("the proxy receives the destination");
+    assert_eq!(&request[..4], &[5, 1, 0, 1]);
+    assert_eq!(&request[4..8], &[127, 0, 0, 1]);
+    assert_eq!(
+        u16::from_be_bytes([request[8], request[9]]),
+        server_address.port()
+    );
+    let mut server = tokio::net::TcpStream::connect(server_address)
+        .await
+        .expect("the proxy connects to llama");
+    connection
+        .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0])
+        .await
+        .expect("the proxy accepts the request");
+    connections
+        .send(())
+        .expect("the test receives the proxy connection");
+    let _ = tokio::io::copy_bidirectional(&mut connection, &mut server).await;
+}
+
 #[tokio::test]
 async fn user_connects_to_llama_through_proxy() {
     let home_directory = std::env::temp_dir().join(format!("shodan-home-{}", uuid::Uuid::new_v4()));
@@ -80,49 +143,35 @@ async fn user_connects_to_llama_through_proxy() {
     let proxy_address = listener.local_addr().expect("the proxy has an address");
     let (connections, mut received_connections) = tokio::sync::mpsc::unbounded_channel();
     let proxy = tokio::spawn(async move {
-        while let Ok((mut connection, _)) = listener.accept().await {
-            let connections = connections.clone();
-            tokio::spawn(async move {
-                let mut greeting = [0; 2];
-                connection
-                    .read_exact(&mut greeting)
-                    .await
-                    .expect("the proxy receives a greeting");
-                let mut methods = vec![0; usize::from(greeting[1])];
-                connection
-                    .read_exact(&mut methods)
-                    .await
-                    .expect("the proxy receives authentication methods");
-                connection
-                    .write_all(&[5, 0])
-                    .await
-                    .expect("the proxy accepts unauthenticated connections");
-                let mut request = [0; 10];
-                connection
-                    .read_exact(&mut request)
-                    .await
-                    .expect("the proxy receives the destination");
-                assert_eq!(&request[..4], &[5, 1, 0, 1]);
-                assert_eq!(&request[4..8], &[127, 0, 0, 1]);
-                assert_eq!(
-                    u16::from_be_bytes([request[8], request[9]]),
-                    server_address.port()
-                );
-                let mut server = tokio::net::TcpStream::connect(server_address)
-                    .await
-                    .expect("the proxy connects to llama");
-                connection
-                    .write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0])
-                    .await
-                    .expect("the proxy accepts the request");
-                connections
-                    .send(())
-                    .expect("the test receives the proxy connection");
-                let _ = tokio::io::copy_bidirectional(&mut connection, &mut server).await;
-            });
+        while let Ok((connection, _)) = listener.accept().await {
+            tokio::spawn(forward_proxy_connection(
+                connection,
+                server_address,
+                connections.clone(),
+            ));
         }
     });
-    let configuration = json!({"proxy": {"url": format!("socks5h://{proxy_address}"), "providers": ["llama"]}, "default_provider": "llama", "providers": {"llama": {"address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}]}}});
+    let configuration = json!({
+        "proxy": {
+            "url": format!("socks5h://{proxy_address}"),
+            "providers": [
+                "llama"
+            ]
+        },
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    });
     std::fs::write(
         configuration_directory.join("settings.json"),
         configuration.to_string(),
@@ -154,7 +203,27 @@ async fn user_connects_to_llama_through_proxy() {
 }
 
 fn create_openai_proxy_configuration(address: std::net::SocketAddr) -> serde_json::Value {
-    json!({"proxy": {"url": format!("socks5h://{address}"), "providers": ["openai"]}, "default_provider": "llama", "providers": {"llama": {"address": "http://127.0.0.1:8080", "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}]}}})
+    json!({
+        "proxy": {
+            "url": format!("socks5h://{address}"),
+            "providers": [
+                "openai"
+            ]
+        },
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": "http://127.0.0.1:8080",
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    })
 }
 
 #[tokio::test]
@@ -266,7 +335,22 @@ async fn user_connects_with_existing_configuration() {
     std::fs::create_dir_all(&configuration_directory)
         .expect("the configuration directory can be created");
     let (address, mut requests) = RecordedLlama::new().start().await;
-    let configuration = json!({"default_provider": "llama", "providers": {"llama": {"address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}]}}}).to_string();
+    let configuration = json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                "models": [
+                    {
+                        "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                        "thinking_level": "low"
+                    }
+                ]
+            }
+        }
+    })
+    .to_string();
     let path = configuration_directory.join("settings.json");
     std::fs::write(&path, &configuration).expect("the configuration can be written");
     let mut application = run_test_application(
@@ -302,7 +386,28 @@ fn user_starts_with_invalid_proxy_settings() {
     let path = configuration_directory.join("settings.json");
     std::fs::write(
         &path,
-        json!({"proxy": {"url": "invalid", "providers": ["openai"]}, "default_provider": "llama", "providers": {"llama": {"address": "http://127.0.0.1:8080", "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [{"name": "Inkling-2-Mini-UD-IQ3_XXS", "thinking_level": "low"}]}}}).to_string(),
+        json!({
+            "proxy": {
+                "url": "invalid",
+                "providers": [
+                    "openai"
+                ]
+            },
+            "default_provider": "llama",
+            "providers": {
+                "llama": {
+                    "address": "http://127.0.0.1:8080",
+                    "default_model": "Inkling-2-Mini-UD-IQ3_XXS",
+                    "models": [
+                        {
+                            "name": "Inkling-2-Mini-UD-IQ3_XXS",
+                            "thinking_level": "low"
+                        }
+                    ]
+                }
+            }
+        })
+        .to_string(),
     )
     .expect("the configuration can be written");
     let result = build_settings(home_directory.clone(), Vec::new());

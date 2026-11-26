@@ -139,7 +139,20 @@ async fn user_records_provider_responses() {
     let configuration_directory = directory.join(".shodan");
     std::fs::create_dir_all(&configuration_directory)
         .expect("the configuration directory can be created");
-    let configuration = serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": address, "default_model": "LFM3-Omni-2B-Q4_K_M", "models": [{"name": "LFM3-Omni-2B-Q4_K_M"}]}}});
+    let configuration = serde_json::json!({
+        "default_provider": "llama",
+        "providers": {
+            "llama": {
+                "address": address,
+                "default_model": "LFM3-Omni-2B-Q4_K_M",
+                "models": [
+                    {
+                        "name": "LFM3-Omni-2B-Q4_K_M"
+                    }
+                ]
+            }
+        }
+    });
     std::fs::write(
         configuration_directory.join("settings.json"),
         configuration.to_string(),
