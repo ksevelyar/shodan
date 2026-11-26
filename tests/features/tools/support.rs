@@ -28,7 +28,7 @@ pub async fn run_scenario(
     expected_tool_results: &[&str],
     expected_exact_tool_result: Option<&str>,
     expected_responses: &[&str],
-) {
+) -> ratatui::buffer::Buffer {
     let (address, mut requests) = RecordedLlama::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
@@ -98,7 +98,7 @@ pub async fn run_scenario(
     let tool_path = expected_arguments["path"]
         .as_str()
         .expect("the tool path is text");
-    application
+    let tool_screen = application
         .wait_for_screen(|screen| {
             let history = (0..screen.area.height.saturating_sub(4))
                 .filter(|&row| screen[(0, row)].bg != ratatui::style::Color::Rgb(55, 55, 55))
@@ -125,4 +125,5 @@ pub async fn run_scenario(
                 .all(|expected| screen.contains(expected))
         })
         .await;
+    tool_screen
 }

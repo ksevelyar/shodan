@@ -110,7 +110,7 @@ async fn post_messages(
                 Some(serde_json::json!({"role": "assistant", "content": content, "tool_calls": calls}))
             }
             Message::Model { aborted: true, .. } | Message::FailedResponse(_) => None,
-            Message::ToolResult { call_id, content } => Some(serde_json::json!({"role":"tool", "tool_call_id":call_id, "content":content})),
+            Message::ToolResult { call_id, content, .. } => Some(serde_json::json!({"role":"tool", "tool_call_id":call_id, "content":content})),
         })
         .collect::<Vec<_>>();
     let mut request = serde_json::json!({"model": model, "messages": messages, "tools": tools::describe_tools(), "stream": true, "stream_options": {"include_usage": true}});

@@ -62,7 +62,7 @@ fn get_login_state(screen: &ratatui::buffer::Buffer) -> String {
         .into_owned()
 }
 
-fn create_openai_home(address: &str) -> TestHome {
+pub(crate) fn create_openai_home(address: &str) -> TestHome {
     let home = create_home(serde_json::json!({
         "default_provider": "openai",
         "providers": {"openai": {

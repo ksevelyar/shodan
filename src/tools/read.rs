@@ -7,6 +7,16 @@ pub(super) async fn read_file(
     offset: Option<usize>,
     limit: Option<usize>,
 ) -> io::Result<String> {
+    read_file_with_context(path, offset, limit)
+        .await
+        .map(|(content, _)| content)
+}
+
+pub(super) async fn read_file_with_context(
+    path: &Path,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> io::Result<(String, String)> {
     let first_line = offset.unwrap_or(1);
     if first_line == 0 || limit == Some(0) {
         return Err(io::Error::new(
@@ -17,6 +27,7 @@ pub(super) async fn read_file(
     let file = tokio::fs::File::open(path).await?;
     let mut reader = BufReader::new(file);
     let mut line = String::new();
+    let mut preceding_content = String::new();
     for _ in 1..first_line {
         line.clear();
         if reader.read_line(&mut line).await? == 0 {
@@ -25,6 +36,7 @@ pub(super) async fn read_file(
                 "offset is beyond the end of the file",
             ));
         }
+        preceding_content.push_str(&line);
     }
     let mut content = String::new();
     for line_number in 0..limit.unwrap_or(usize::MAX) {
@@ -40,5 +52,5 @@ pub(super) async fn read_file(
         }
         content.push_str(&line);
     }
-    Ok(content)
+    Ok((content, preceding_content))
 }

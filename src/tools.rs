@@ -47,6 +47,13 @@ struct DirectoryArguments {
     path: String,
 }
 
+#[derive(Clone)]
+pub struct ReadDisplay {
+    pub path: String,
+    pub offset: usize,
+    pub preceding_content: String,
+}
+
 #[derive(Deserialize)]
 struct FileArguments {
     path: String,
@@ -62,7 +69,35 @@ pub(crate) fn describe_tools() -> Vec<Value> {
     ]
 }
 
-pub(crate) async fn execute(name: &str, arguments: &str) -> String {
+pub(crate) async fn execute(name: &str, arguments: &str) -> (String, Option<ReadDisplay>) {
+    if name == "read" {
+        return match serde_json::from_str::<FileArguments>(arguments) {
+            Ok(arguments) => match read::read_file_with_context(
+                Path::new(&arguments.path),
+                arguments.offset,
+                arguments.limit,
+            )
+            .await
+            {
+                Ok((content, preceding_content)) => (
+                    content,
+                    Some(ReadDisplay {
+                        path: arguments.path,
+                        offset: arguments.offset.unwrap_or(1),
+                        preceding_content,
+                    }),
+                ),
+                Err(error) => (
+                    format!(
+                        "Error: tool: Failed to read file {}: {error}",
+                        arguments.path
+                    ),
+                    None,
+                ),
+            },
+            Err(error) => (format!("Error: {error}"), None),
+        };
+    }
     let result = match name {
         "bash" => match serde_json::from_str::<CommandArguments>(arguments) {
             Ok(arguments) => run_bash_command(&arguments.command)
@@ -76,17 +111,10 @@ pub(crate) async fn execute(name: &str, arguments: &str) -> String {
                 .map_err(|error| error.to_string()),
             Err(error) => Err(error.to_string()),
         },
-        "read" => match serde_json::from_str::<FileArguments>(arguments) {
-            Ok(arguments) => read_file(
-                Path::new(&arguments.path),
-                arguments.offset,
-                arguments.limit,
-            )
-            .await
-            .map_err(|error| error.to_string()),
-            Err(error) => Err(error.to_string()),
-        },
         _ => Err(format!("unknown tool: {name}")),
     };
-    result.unwrap_or_else(|error| format!("Error: {error}"))
+    (
+        result.unwrap_or_else(|error| format!("Error: {error}")),
+        None,
+    )
 }

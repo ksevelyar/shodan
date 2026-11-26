@@ -25,6 +25,7 @@ pub(crate) enum Message {
     ToolResult {
         call_id: String,
         content: String,
+        display: Option<tools::ReadDisplay>,
     },
     FailedResponse(String),
 }
@@ -128,11 +129,12 @@ fn start_next_tool(application: &mut Application) {
     let turn = application.session.turn;
     let event_sender = application.event_sender.clone();
     application.active_request = Some(tokio::spawn(async move {
-        let content = tools::execute(&call.name, &call.arguments).await;
+        let (content, display) = tools::execute(&call.name, &call.arguments).await;
         let _ = event_sender.send(Event::ToolCompleted {
             turn,
             call_id: call.id,
             content,
+            display,
         });
     }));
 }
@@ -230,12 +232,14 @@ pub(crate) fn apply_event(application: &mut Application, event: Event) {
             turn,
             call_id,
             content,
+            display,
         } if turn == application.session.turn && application.response_started.is_some() => {
             application.active_request = None;
-            application
-                .session
-                .messages
-                .push(Message::ToolResult { call_id, content });
+            application.session.messages.push(Message::ToolResult {
+                call_id,
+                content,
+                display,
+            });
             start_next_tool(application);
         }
         Event::RequestFailed { turn, error }

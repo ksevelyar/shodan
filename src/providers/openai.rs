@@ -243,7 +243,9 @@ fn build_input(messages: &[Message]) -> (String, Vec<Value>) {
                     input.extend(provider_items.iter().cloned());
                 }
             }
-            Message::ToolResult { call_id, content } => input.push(
+            Message::ToolResult {
+                call_id, content, ..
+            } => input.push(
                 json!({"type": "function_call_output", "call_id": call_id, "output": content}),
             ),
             Message::Model { aborted: true, .. } | Message::FailedResponse(_) => {}

@@ -1,4 +1,4 @@
-use std::{io, ops::ControlFlow};
+use std::{io, ops::ControlFlow, path::Path, sync::OnceLock};
 
 use crossterm::{
     event::{
@@ -14,15 +14,17 @@ use ratatui::{
     backend::Backend,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::Paragraph,
 };
+use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
 use tokio::io::AsyncWriteExt;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     application::{Application, ApplicationError, Statistics},
     chats::{Message, ToolCall, abort_response, send_message},
+    tools::ReadDisplay,
 };
 
 pub(crate) async fn copy_to_clipboard(text: &str, command: Option<&[String]>) -> bool {
@@ -597,23 +599,87 @@ fn wrap_message_section(
     lines
 }
 
-fn draw_interface(frame: &mut Frame<'_>, application: &mut Application) {
-    let messages = &application.session.messages;
-    let input = application.input.as_str();
-    let statistics = &application.statistics;
-    let scroll_from_bottom = application.scroll_from_bottom;
-    let maximum_scroll = &mut application.maximum_scroll;
-    let areas = Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(frame.area());
-    let width = usize::from(areas[0].width).max(1);
+fn format_read_result(content: &str, display: &ReadDisplay, width: usize) -> Vec<Line<'static>> {
+    static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
+    static THEMES: OnceLock<ThemeSet> = OnceLock::new();
+    let syntaxes = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
+    let themes = THEMES.get_or_init(ThemeSet::load_defaults);
+    let syntax = Path::new(&display.path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(|extension| syntaxes.find_syntax_by_extension(extension))
+        .unwrap_or_else(|| syntaxes.find_syntax_plain_text());
+    let theme = &themes.themes["base16-ocean.dark"];
+    let mut highlighter = HighlightLines::new(syntax, theme);
+    for line in display.preceding_content.split_inclusive('\n') {
+        let _ = highlighter.highlight_line(line, syntaxes);
+    }
+    let line_count = content.lines().count();
+    let number_width = (display.offset + line_count.saturating_sub(1))
+        .to_string()
+        .len();
+    let background = Color::from(Palette::Lavender);
+    let mut output = vec![Line::from("Result:").style(Style::default().bg(background))];
+    for (position, line) in content.split_inclusive('\n').enumerate() {
+        let prefix = format!("{:>number_width$}  ", display.offset + position);
+        let mut spans = vec![Span::styled(
+            prefix.clone(),
+            Style::default().fg(Color::Gray).bg(background),
+        )];
+        let mut used_width = prefix.width();
+        let styled_segments = highlighter
+            .highlight_line(line, syntaxes)
+            .unwrap_or_else(|_| vec![(syntect::highlighting::Style::default(), line)]);
+        for (style, text) in styled_segments {
+            let foreground = Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
+            let mut fragment = String::new();
+            for character in text.trim_end_matches(['\r', '\n']).chars() {
+                let character_width = character.width().unwrap_or(0);
+                if used_width + character_width > width && used_width > prefix.width() {
+                    if !fragment.is_empty() {
+                        spans.push(Span::styled(
+                            std::mem::take(&mut fragment),
+                            Style::default().fg(foreground).bg(background),
+                        ));
+                    }
+                    output.push(
+                        Line::from(std::mem::take(&mut spans))
+                            .style(Style::default().bg(background)),
+                    );
+                    spans.push(Span::styled(
+                        " ".repeat(prefix.width()),
+                        Style::default().bg(background),
+                    ));
+                    used_width = prefix.width();
+                }
+                fragment.push(character);
+                used_width += character_width;
+            }
+            if !fragment.is_empty() {
+                spans.push(Span::styled(
+                    fragment,
+                    Style::default().fg(foreground).bg(background),
+                ));
+            }
+        }
+        output.push(Line::from(spans).style(Style::default().bg(background)));
+    }
+    output
+}
+
+fn format_messages(messages: &[Message], width: usize) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for message in messages {
+        if let Message::ToolResult {
+            content,
+            display: Some(display),
+            ..
+        } = message
+        {
+            lines.extend(format_read_result(content, display, width));
+            lines.push(Line::default());
+            continue;
+        }
         let (sections, user, aborted) = match message {
             Message::System(_) => continue,
             Message::User(content) => (vec![(content.clone(), Style::default())], true, false),
@@ -653,6 +719,24 @@ fn draw_interface(frame: &mut Frame<'_>, application: &mut Application) {
         }
         lines.push(Line::default());
     }
+    lines
+}
+
+fn draw_interface(frame: &mut Frame<'_>, application: &mut Application) {
+    let input = application.input.as_str();
+    let statistics = &application.statistics;
+    let scroll_from_bottom = application.scroll_from_bottom;
+    let maximum_scroll = &mut application.maximum_scroll;
+    let areas = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(frame.area());
+    let width = usize::from(areas[0].width).max(1);
+    let mut lines = format_messages(&application.session.messages, width);
     if let Some(error) = &application.error {
         lines.extend(
             textwrap::wrap(&format!("Request failed: {error}"), width)
