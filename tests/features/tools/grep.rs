@@ -6,10 +6,10 @@ use super::support::{prepare_scenario, run_tool_scenario};
 async fn user_searches_file_contents() {
     let path = prepare_scenario("search-scenarios", "user_searches_file_contents");
     fs::create_dir_all(path.join("src")).expect("directory can be created");
-    fs::write(path.join("src/main.rs"), "fn main() {}\n").expect("file can be written");
+    fs::write(path.join("src/main.rs"), "fn main() {}   \n").expect("file can be written");
     let (output, _) =
-        run_tool_scenario("user_searches_file_contents", "grep", "main.rs:1:fn main()").await;
-    assert!(output.contains("main.rs:1:fn main()"));
+        run_tool_scenario("user_searches_file_contents", "grep", "Use grep once to search target/search-scenarios/user_searches_file_contents/src for fn main. Report the result.", "main.rs:1:fn main()").await;
+    assert_eq!(output, "main.rs:1:fn main() {}   ");
 }
 
 #[tokio::test]
@@ -19,7 +19,7 @@ async fn user_searches_with_file_filter() {
     fs::write(path.join("src/main.rs"), "hello\n").expect("file can be written");
     fs::write(path.join("src/notes.txt"), "hello\n").expect("file can be written");
     let (output, _) =
-        run_tool_scenario("user_searches_with_file_filter", "grep", "main.rs:1:hello").await;
+        run_tool_scenario("user_searches_with_file_filter", "grep", "Use grep once to search target/search-scenarios/user_searches_with_file_filter/src for hello with glob *.rs. Report the result.", "main.rs:1:hello").await;
     assert_eq!(output, "main.rs:1:hello");
 }
 
@@ -33,6 +33,7 @@ async fn user_searches_for_literal_text_without_regard_to_case() {
     let (output, _) = run_tool_scenario(
         "user_searches_for_literal_text_without_regard_to_case",
         "grep",
+        "Use grep once to search target/search-scenarios/user_searches_for_literal_text_without_regard_to_case/notes.txt for literal text version 1.0 ignoring case. Report the result.",
         "notes.txt:1:Version 1.0",
     )
     .await;
@@ -51,6 +52,7 @@ async fn user_searches_directory_with_ignored_files() {
     let (output, _) = run_tool_scenario(
         "user_searches_directory_with_ignored_files",
         "grep",
+        "Use grep once to search target/search-scenarios/user_searches_directory_with_ignored_files for hello. Report the result.",
         ".notes:1:hello",
     )
     .await;
@@ -64,6 +66,7 @@ async fn user_sees_truncated_search_results() {
     let (output, _) = run_tool_scenario(
         "user_sees_truncated_search_results",
         "grep",
+        "Use grep once to search target/search-scenarios/user_sees_truncated_search_results for match. Report the result.",
         "results truncated",
     )
     .await;
@@ -82,13 +85,13 @@ async fn user_searches_with_no_matches() {
     let path = prepare_scenario("search-scenarios", "user_searches_with_no_matches");
     fs::write(path.join("notes.txt"), "hello\n").expect("file can be written");
     let (output, _) =
-        run_tool_scenario("user_searches_with_no_matches", "grep", "No matches found").await;
+        run_tool_scenario("user_searches_with_no_matches", "grep", "Use grep once to search target/search-scenarios/user_searches_with_no_matches/notes.txt for missing. Report the result.", "No matches found").await;
     assert_eq!(output, "No matches found");
 }
 
 #[tokio::test]
 async fn user_searches_invalid_path() {
     prepare_scenario("search-scenarios", "user_searches_invalid_path");
-    let (output, _) = run_tool_scenario("user_searches_invalid_path", "grep", "No such file").await;
+    let (output, _) = run_tool_scenario("user_searches_invalid_path", "grep", "Use grep once to search target/search-scenarios/user_searches_invalid_path/missing for hello. Do not retry if it fails. Report the result.", "No such file").await;
     assert!(output.contains("No such file"));
 }

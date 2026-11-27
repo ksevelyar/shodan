@@ -1,13 +1,11 @@
 use std::{
     fs::{self, OpenOptions},
-    io::{self, Write},
-    path::{Path, PathBuf},
-    sync::Mutex,
+    sync::atomic::AtomicBool,
 };
 
 use serde::Deserialize;
 
-use super::EditDisplay;
+use super::{EditDisplay, replace_file_atomically, run_file_mutation};
 
 pub(super) fn describe() -> serde_json::Value {
     serde_json::json!({"type":"function","function":{"name":"edit","description":"Edit one existing file with exact, unique, non-overlapping replacements matched against the original file. Include all changes to the file in one call.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path"},"edits":{"type":"array","minItems":1,"items":{"type":"object","properties":{"oldText":{"type":"string","description":"Nonempty text to replace, unique in the original file"},"newText":{"type":"string","description":"Replacement text"}},"required":["oldText","newText"]}}},"required":["path","edits"]}}})
@@ -26,23 +24,11 @@ pub(super) struct Replacement {
     new_text: String,
 }
 
-struct TemporaryFile(PathBuf);
-
-impl Drop for TemporaryFile {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-
 pub(super) async fn edit_file(arguments: EditArguments) -> Result<EditDisplay, String> {
-    tokio::task::spawn_blocking(move || apply_edits(arguments))
-        .await
-        .map_err(|error| format!("Edit task failed: {error}"))?
+    run_file_mutation(move |cancelled| apply_edits(arguments, cancelled)).await
 }
 
-fn apply_edits(arguments: EditArguments) -> Result<EditDisplay, String> {
-    static MUTATION_LOCK: Mutex<()> = Mutex::new(());
-    let _guard = MUTATION_LOCK.lock().map_err(|error| error.to_string())?;
+fn apply_edits(arguments: EditArguments, cancelled: &AtomicBool) -> Result<EditDisplay, String> {
     if arguments.edits.is_empty() {
         return Err("edits must contain at least one replacement".to_owned());
     }
@@ -102,7 +88,7 @@ fn apply_edits(arguments: EditArguments) -> Result<EditDisplay, String> {
             .write(true)
             .open(&path)
             .map_err(|error| format!("Could not write {}: {error}", arguments.path))?;
-        write_replacement(&path, &updated, &metadata)
+        replace_file_atomically(&path, &updated, Some(&metadata), cancelled)
             .map_err(|error| format!("Could not write {}: {error}", arguments.path))?;
     }
     Ok(EditDisplay {
@@ -110,21 +96,4 @@ fn apply_edits(arguments: EditArguments) -> Result<EditDisplay, String> {
         original,
         updated,
     })
-}
-
-fn write_replacement(path: &Path, content: &str, metadata: &fs::Metadata) -> io::Result<()> {
-    let directory = path
-        .parent()
-        .ok_or_else(|| io::Error::other("file has no parent directory"))?;
-    let temporary_path = directory.join(format!(".shodan-{}", uuid::Uuid::new_v4()));
-    let temporary_file = TemporaryFile(temporary_path);
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary_file.0)?;
-    file.set_permissions(metadata.permissions())?;
-    file.write_all(content.as_bytes())?;
-    file.sync_all()?;
-    fs::rename(&temporary_file.0, path)?;
-    Ok(())
 }

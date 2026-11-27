@@ -27,7 +27,7 @@ ring = "0.17"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1"
 similar = "2.7"
-syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-onig"] }
 textwrap = "0.16.4"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "process", "net"] }
 unicode-width = "0.2.3"

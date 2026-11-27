@@ -1,21 +1,7 @@
-use std::{
-    path::Path,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-};
+use std::path::Path;
 
-use globset::{Glob, GlobMatcher};
+use globset::{GlobBuilder, GlobMatcher};
 use ignore::WalkBuilder;
-
-pub(super) struct Cancellation(pub Arc<AtomicBool>);
-
-impl Drop for Cancellation {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::Relaxed);
-    }
-}
 
 pub(super) fn create_walker(path: &Path) -> ignore::Walk {
     let mut builder = WalkBuilder::new(path);
@@ -27,15 +13,29 @@ pub(super) fn create_walker(path: &Path) -> ignore::Walk {
     builder.build()
 }
 
-pub(super) fn compile_glob(pattern: &str) -> Result<GlobMatcher, String> {
-    Glob::new(pattern)
-        .map(|glob| glob.compile_matcher())
-        .map_err(|error| error.to_string())
+pub(super) struct PathPattern {
+    matcher: GlobMatcher,
+    match_file_name: bool,
 }
 
-pub(super) fn matches_glob(matcher: &GlobMatcher, relative: &Path) -> bool {
-    matcher.is_match(relative)
-        || relative
+pub(super) fn compile_glob(pattern: &str) -> Result<PathPattern, String> {
+    let matcher = GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .build()
+        .map_err(|error| error.to_string())?
+        .compile_matcher();
+    Ok(PathPattern {
+        matcher,
+        match_file_name: !pattern.contains('/'),
+    })
+}
+
+pub(super) fn matches_glob(pattern: &PathPattern, relative: &Path) -> bool {
+    if pattern.match_file_name {
+        relative
             .file_name()
-            .is_some_and(|name| matcher.is_match(name))
+            .is_some_and(|name| pattern.matcher.is_match(name))
+    } else {
+        pattern.matcher.is_match(relative)
+    }
 }

@@ -22,6 +22,7 @@ pub(crate) async fn send_scenario_response(
 pub(crate) async fn run_tool_scenario(
     scenario: &str,
     tool: &str,
+    prompt: &str,
     expected_screen: &str,
 ) -> (String, ratatui::buffer::Buffer) {
     let (address, mut requests) = RecordedProvider::new().start_openai().await;
@@ -32,7 +33,7 @@ pub(crate) async fn run_tool_scenario(
     if tool == "write" {
         application.press_key(crossterm::event::KeyCode::Tab);
     }
-    application.send_message(&format!("Use the {tool} tool for {scenario}."));
+    application.send_message(prompt);
     let request = receive_request(&mut requests).await;
     let directory = Path::new("tests/features/fixtures/openai/tools").join(scenario);
     let response =
@@ -56,7 +57,28 @@ pub(crate) async fn run_tool_scenario(
         .await;
     let response =
         fs::read_to_string(directory.join("response-2.txt")).expect("model response was recorded");
+    let response_text = response
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["type"] == "response.output_text.done")
+        .expect("recording contains model response")["text"]
+        .as_str()
+        .expect("model response is text")
+        .to_owned();
+    let expected_response = response_text
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace('`', "");
     send_response_bytes(&request, &response).await;
+    application
+        .wait_for_screen(|screen| {
+            read_history(screen).contains(&expected_response)
+                && super::super::support::read_bottom_line(screen).contains('⏱')
+        })
+        .await;
     (output, screen)
 }
 

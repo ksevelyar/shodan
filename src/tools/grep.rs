@@ -10,7 +10,10 @@ use std::{
 use regex::RegexBuilder;
 use serde::Deserialize;
 
-use super::search::{Cancellation, compile_glob, create_walker, matches_glob};
+use super::{
+    Cancellation,
+    search::{compile_glob, create_walker, matches_glob},
+};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,6 +105,6 @@ fn search_files(arguments: SearchArguments, cancelled: &AtomicBool) -> Result<St
     if output.is_empty() {
         Ok("No matches found".to_owned())
     } else {
-        Ok(output.trim_end().to_owned())
+        Ok(output.trim_end_matches('\n').to_owned())
     }
 }

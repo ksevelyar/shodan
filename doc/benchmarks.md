@@ -13,6 +13,8 @@
 cargo bench --bench conversation -- session_restore/cold_process
 ```
 
+Redraw benchmarks prepare each conversation once and reuse it for warmup and measurement. Setup is outside the timed boundary.
+
 ## 2. User scrolls a conversation after twenty messages
 
 * User sends twenty messages to the Llama model.
@@ -60,5 +62,5 @@ cargo bench --bench conversation -- conversation_scroll/technical_debt_reads/1
 * User drags a selection across the conversation while the next response is pending.
 
 ```sh
-cargo bench --bench conversation -- technical_debt_selection_drag
+cargo bench --bench conversation -- technical_debt_selection_drag/drag
 ```

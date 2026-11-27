@@ -8,7 +8,10 @@ use std::{
 
 use serde::Deserialize;
 
-use super::search::{Cancellation, compile_glob, create_walker, matches_glob};
+use super::{
+    Cancellation,
+    search::{compile_glob, create_walker, matches_glob},
+};
 
 #[derive(Deserialize)]
 pub(super) struct FindArguments {
@@ -75,6 +78,6 @@ fn find_paths(arguments: FindArguments, cancelled: &AtomicBool) -> Result<String
     if output.is_empty() {
         Ok("No paths found".to_owned())
     } else {
-        Ok(output.trim_end().to_owned())
+        Ok(output.trim_end_matches('\n').to_owned())
     }
 }

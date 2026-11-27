@@ -7,7 +7,15 @@ mod read;
 mod search;
 mod write;
 
-use std::path::Path;
+use std::{
+    fs::{self, OpenOptions},
+    io::{self, Write},
+    path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use crate::application::ApplicationError;
 
@@ -41,6 +49,66 @@ pub async fn read_file(
     read::read_file(path, offset, limit).await.map_err(|error| {
         ApplicationError::Tool(format!("Failed to read file {}: {error}", path.display()))
     })
+}
+
+static MUTATION_LOCK: Mutex<()> = Mutex::new(());
+
+struct Cancellation(Arc<AtomicBool>);
+
+impl Drop for Cancellation {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+struct TemporaryFile(PathBuf);
+
+impl Drop for TemporaryFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+async fn run_file_mutation<Output: Send + 'static>(
+    operation: impl FnOnce(&AtomicBool) -> Result<Output, String> + Send + 'static,
+) -> Result<Output, String> {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let _cancellation = Cancellation(cancelled.clone());
+    tokio::task::spawn_blocking(move || {
+        let _guard = MUTATION_LOCK.lock().map_err(|error| error.to_string())?;
+        if cancelled.load(Ordering::Relaxed) {
+            return Err("Mutation aborted".to_owned());
+        }
+        operation(&cancelled)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn replace_file_atomically(
+    path: &Path,
+    content: &str,
+    metadata: Option<&fs::Metadata>,
+    cancelled: &AtomicBool,
+) -> io::Result<()> {
+    let directory = path
+        .parent()
+        .ok_or_else(|| io::Error::other("file has no parent directory"))?;
+    let temporary_file = TemporaryFile(directory.join(format!(".shodan-{}", uuid::Uuid::new_v4())));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary_file.0)?;
+    if let Some(metadata) = metadata {
+        file.set_permissions(metadata.permissions())?;
+    }
+    file.write_all(content.as_bytes())?;
+    file.sync_all()?;
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(io::Error::other("Mutation aborted"));
+    }
+    fs::rename(&temporary_file.0, path)?;
+    Ok(())
 }
 
 #[derive(Deserialize)]

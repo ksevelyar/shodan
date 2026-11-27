@@ -136,13 +136,23 @@ impl Conversation {
         };
         self.scroll_up = !self.scroll_up;
         self.application.scroll_mouse(kind, 10, 10);
-        self.application.wait_for_next_frame().await;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            self.application.wait_for_next_frame(),
+        )
+        .await
+        .expect("scrolling produces a frame");
     }
 
     async fn drag(&mut self, column: u16) {
         self.application
             .scroll_mouse(MouseEventKind::Drag(MouseButton::Left), column, 18);
-        self.application.wait_for_next_frame().await;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            self.application.wait_for_next_frame(),
+        )
+        .await
+        .expect("dragging produces a frame");
     }
 }
 
@@ -163,8 +173,10 @@ fn benchmark_conversation_redraw(criterion: &mut Criterion) {
             RecordedConversation::TechnicalDebtReads,
         ),
     ] {
+        let mut conversation = None;
         group.bench_with_input(BenchmarkId::new(name, turns), &turns, |benchmark, _| {
-            let mut conversation = runtime.block_on(Conversation::build(turns, recording));
+            let conversation = conversation
+                .get_or_insert_with(|| runtime.block_on(Conversation::build(turns, recording)));
             benchmark.iter_custom(|iterations| {
                 let started = Instant::now();
                 runtime.block_on(async {
@@ -177,16 +189,25 @@ fn benchmark_conversation_redraw(criterion: &mut Criterion) {
         });
     }
     group.finish();
-    criterion.bench_function("technical_debt_selection_drag", |benchmark| {
-        let mut conversation = runtime.block_on(Conversation::build(
-            1,
-            RecordedConversation::TechnicalDebtReads,
-        ));
-        conversation
-            .application
-            .scroll_mouse(MouseEventKind::Down(MouseButton::Left), 0, 1);
-        runtime.block_on(conversation.application.wait_for_next_frame());
-        let mut column = 100;
+    let mut group = criterion.benchmark_group("technical_debt_selection_drag");
+    group
+        .sample_size(10)
+        .warm_up_time(Duration::from_secs(1))
+        .measurement_time(Duration::from_secs(2));
+    let mut conversation = None;
+    let mut column = 100;
+    group.bench_function("drag", |benchmark| {
+        let conversation = conversation.get_or_insert_with(|| {
+            let mut conversation = runtime.block_on(Conversation::build(
+                1,
+                RecordedConversation::TechnicalDebtReads,
+            ));
+            conversation
+                .application
+                .scroll_mouse(MouseEventKind::Down(MouseButton::Left), 0, 1);
+            runtime.block_on(conversation.application.wait_for_next_frame());
+            conversation
+        });
         benchmark.iter_custom(|iterations| {
             let started = Instant::now();
             runtime.block_on(async {
@@ -198,6 +219,7 @@ fn benchmark_conversation_redraw(criterion: &mut Criterion) {
             started.elapsed()
         });
     });
+    group.finish();
 }
 
 fn measure_session_restore(home: &Path) {
