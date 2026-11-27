@@ -4,7 +4,8 @@
 
 * User can ask Shodan to read a text file.
 * User can ask Shodan to read part of a text file.
-* File reading results show line numbers from the original file and syntax highlighting for code in the conversation.
+* File reading requests show `read` followed by the file path.
+* File reading results show line numbers from the original file and syntax highlighting for code on a purple background across the conversation width.
 * Model receives the requested file contents.
 * User is informed when a file cannot be read.
 
@@ -14,7 +15,7 @@
 
 * A file named `greeting.txt` contains the text `Hello, Shodan!`.
 * User asks Shodan to read `greeting.txt`.
-* User sees the file reading request and its result, `Hello, Shodan!`, in the conversation.
+* User sees `read` followed by the file path and its result, `Hello, Shodan!`, on a purple background across the conversation width.
 * Model responds using the file contents.
 
 ### 2. User reads part of a file

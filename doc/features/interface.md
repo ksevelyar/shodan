@@ -3,6 +3,7 @@
 ## Requirements
 
 * The user can scroll through conversation history.
+* The user can scroll through tool results and abort while a response is in progress.
 * A textarea allows the user to compose messages.
 * The status panel remains visible at the bottom while the user scrolls through conversation history.
 * User can select text across the interface by dragging the mouse.
@@ -66,3 +67,9 @@
 * User configures a clipboard command.
 * User selects text and releases the mouse.
 * The command receives the selected text.
+
+### 10. User scrolls through a file read and aborts a response
+
+* User asks the model to read a source file.
+* The model reads the file and continues its response.
+* User scrolls through the source file and aborts the response.

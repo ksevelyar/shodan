@@ -70,7 +70,7 @@ async fn user_lists_directory() {
             let history = read_tool_history(screen);
             history
                 .lines()
-                .any(|line| line.trim_start().starts_with("ls") && line.contains(tool_path))
+                .any(|line| line.trim() == format!("ls {tool_path}"))
                 && expected_tool_results
                     .iter()
                     .all(|expected| history.contains(expected))
