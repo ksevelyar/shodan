@@ -5,7 +5,9 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
-use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
+use syntect::{easy::HighlightLines, parsing::SyntaxSet};
+
+use super::theme::{Palette, get_syntax_theme};
 use unicode_width::UnicodeWidthStr;
 
 fn hide_delimiters(visible: &mut [bool], range: Range<usize>, length: usize) {
@@ -17,13 +19,11 @@ fn hide_delimiters(visible: &mut [bool], range: Range<usize>, length: usize) {
 
 fn highlight_code(content: &str, range: Range<usize>, language: &str, styles: &mut [Style]) {
     static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
-    static THEMES: OnceLock<ThemeSet> = OnceLock::new();
     let syntaxes = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
-    let themes = THEMES.get_or_init(ThemeSet::load_defaults);
     let Some(syntax) = syntaxes.find_syntax_by_token(language) else {
         return;
     };
-    let mut highlighter = HighlightLines::new(syntax, &themes.themes["base16-ocean.dark"]);
+    let mut highlighter = HighlightLines::new(syntax, get_syntax_theme());
     let mut position = range.start;
     for line in content[range.clone()].split_inclusive('\n') {
         if let Ok(segments) = highlighter.highlight_line(line, syntaxes) {
@@ -54,7 +54,9 @@ pub(super) fn format_markdown(
         match event {
             Event::Start(Tag::Heading { .. }) => {
                 for style in &mut styles[range] {
-                    *style = style.add_modifier(Modifier::BOLD);
+                    *style = style
+                        .fg(Color::from(Palette::Yellow))
+                        .add_modifier(Modifier::BOLD);
                 }
             }
             Event::Start(Tag::Strong) => {
@@ -94,7 +96,7 @@ pub(super) fn format_markdown(
                 hide_delimiters(&mut visible, range.clone(), delimiter_length);
                 if base_style.fg.is_none() {
                     for style in &mut styles[range] {
-                        *style = style.fg(Color::Cyan);
+                        *style = style.fg(Color::from(Palette::InlineCode));
                     }
                 }
             }

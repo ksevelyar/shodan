@@ -112,13 +112,17 @@ async fn user_edits_file() {
     let line = (0..screen.area.width)
         .map(|column| screen[(column, row)].symbol())
         .collect::<String>();
+    assert_eq!(
+        screen[(0, row)].fg,
+        ratatui::style::Color::Rgb(87, 161, 109)
+    );
     let keyword = u16::try_from(line.find("let mut").expect("the keyword is visible"))
         .expect("the keyword fits on screen");
     assert_ne!(screen[(keyword, row)].fg, screen[(keyword + 8, row)].fg);
     for column in 0..screen.area.width {
         assert_eq!(
             screen[(column, row)].bg,
-            ratatui::style::Color::Rgb(29, 75, 55)
+            ratatui::style::Color::Rgb(27, 22, 31)
         );
     }
 }

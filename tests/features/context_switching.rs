@@ -26,12 +26,24 @@ async fn user_starts_session_with_project_instructions() {
     }
     let settings = build_settings(home.path().to_owned(), Vec::new()).expect("settings are valid");
     let mut application = run_test_application(settings);
-    application
+    let screen = application
         .wait_for_screen(|screen| {
             read_screen(screen).starts_with("read")
                 && read_history(screen).contains("Read instructions")
         })
         .await;
+    let instruction_row = (0..screen.area.height)
+        .find(|row| screen[(0, *row)].symbol() == "R")
+        .expect("the context instructions are visible");
+    assert_eq!(
+        screen[(0, instruction_row)].fg,
+        ratatui::style::Color::Rgb(213, 170, 42)
+    );
+    let empty_line = (0..screen.area.width)
+        .map(|column| screen[(column, instruction_row + 1)].symbol())
+        .collect::<String>();
+    assert_eq!(empty_line.trim(), "");
+    assert_eq!(screen[(0, instruction_row + 2)].symbol(), "*");
     for (context, prompt) in [
         ("read", "Read instructions"),
         ("edit", "Edit instructions"),
@@ -45,7 +57,7 @@ async fn user_starts_session_with_project_instructions() {
     let request = receive_request(&mut requests).await;
     assert_eq!(
         request.body["messages"][0]["content"],
-        format!("Read instructions\n{}", include_str!("../../AGENTS.md"))
+        format!("Read instructions\n\n{}", include_str!("../../AGENTS.md"))
     );
     let names: Vec<_> = request.body["tools"]
         .as_array()
@@ -86,7 +98,7 @@ async fn user_switches_contexts_and_keeps_conversation() {
     let request = receive_request(&mut requests).await;
     assert_eq!(
         request.body["messages"][0]["content"],
-        format!("Edit instructions\n{}", include_str!("../../AGENTS.md"))
+        format!("Edit instructions\n\n{}", include_str!("../../AGENTS.md"))
     );
     assert_eq!(request.body["messages"][1]["content"], "Hello");
     assert_eq!(request.body["messages"][2]["role"], "assistant");
@@ -106,7 +118,7 @@ async fn user_switches_contexts_and_keeps_conversation() {
     let request = receive_request(&mut requests).await;
     assert_eq!(
         request.body["messages"][0]["content"],
-        format!("Review instructions\n{}", include_str!("../../AGENTS.md"))
+        format!("Review instructions\n\n{}", include_str!("../../AGENTS.md"))
     );
     assert_eq!(
         request.body["tools"]

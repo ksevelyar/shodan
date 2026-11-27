@@ -176,7 +176,7 @@ async fn user_watches_openai_thinking() {
         let column = u16::try_from(column).expect("the thinking fits in the terminal");
         assert_eq!(
             screen[(column, row)].fg,
-            ratatui::style::Color::Rgb(128, 128, 128)
+            ratatui::style::Color::Rgb(94, 107, 133)
         );
         assert!(
             screen[(column, row)]

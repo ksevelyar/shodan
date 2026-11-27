@@ -179,13 +179,13 @@ pub(crate) fn is_available(name: &str, read_context: bool) -> bool {
     !read_context || !matches!(name, "edit" | "write")
 }
 
-pub(crate) async fn execute(name: &str, arguments: &str) -> (String, Option<ToolDisplay>) {
+pub(crate) async fn execute(name: &str, arguments: &str) -> (String, Option<ToolDisplay>, bool) {
     match execute_call(name, arguments).await {
-        Ok(result) => result,
-        Err(error) => (
-            format!("Error: {error}"),
-            (name == "bash").then_some(ToolDisplay::Bash { successful: false }),
-        ),
+        Ok((content, display)) => {
+            let successful = !matches!(display, Some(ToolDisplay::Bash { successful: false }));
+            (content, display, successful)
+        }
+        Err(error) => (format!("Error: {error}"), None, false),
     }
 }
 

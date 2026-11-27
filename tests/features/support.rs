@@ -157,7 +157,7 @@ impl TestApplication {
 pub fn read_history(buffer: &Buffer) -> String {
     let width = usize::from(buffer.area.width);
     let height = usize::from(buffer.area.height);
-    buffer.content()[width..height.saturating_sub(4) * width]
+    buffer.content()[width.saturating_mul(2)..height.saturating_sub(4) * width]
         .iter()
         .map(Cell::symbol)
         .collect()

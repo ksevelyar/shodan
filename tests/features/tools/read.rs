@@ -12,6 +12,36 @@ use super::{
     support::{read_tool_history, send_scenario_response},
 };
 
+fn assert_file_result_is_visible(screen: &ratatui::buffer::Buffer, tool_path: &str) {
+    assert!(read_history(screen).contains("1  Hello, Shodan!"));
+    let row = (0..screen.area.height)
+        .find(|row| {
+            (0..screen.area.width)
+                .map(|column| screen[(column, *row)].symbol())
+                .collect::<String>()
+                .contains("1  Hello, Shodan!")
+        })
+        .expect("the file contents are visible");
+    let preceding_line = (0..screen.area.width)
+        .map(|column| screen[(column, row - 1)].symbol())
+        .collect::<String>();
+    assert_eq!(preceding_line.trim(), "");
+    let call_line = (0..screen.area.width)
+        .map(|column| screen[(column, row - 2)].symbol())
+        .collect::<String>();
+    assert_eq!(call_line.trim(), format!("read {tool_path}"));
+    for column in 0..screen.area.width {
+        assert_eq!(
+            screen[(column, row)].bg,
+            ratatui::style::Color::Rgb(27, 22, 31)
+        );
+        assert_eq!(
+            screen[(column, row - 2)].bg,
+            ratatui::style::Color::Rgb(27, 22, 31)
+        );
+    }
+}
+
 #[tokio::test]
 async fn user_reads_file() {
     let (address, mut requests) = RecordedProvider::new().start().await;
@@ -91,29 +121,7 @@ async fn user_reads_file() {
                 .all(|expected| screen.contains(expected))
         })
         .await;
-    assert!(read_history(&screen).contains("1  Hello, Shodan!"));
-    let row = (0..screen.area.height)
-        .find(|row| {
-            (0..screen.area.width)
-                .map(|column| screen[(column, *row)].symbol())
-                .collect::<String>()
-                .contains("1  Hello, Shodan!")
-        })
-        .expect("the file contents are visible");
-    let preceding_line = (0..screen.area.width)
-        .map(|column| screen[(column, row - 1)].symbol())
-        .collect::<String>();
-    assert_eq!(preceding_line.trim(), format!("read {tool_path}"));
-    for column in 0..screen.area.width {
-        assert_eq!(
-            screen[(column, row)].bg,
-            ratatui::style::Color::Rgb(84, 70, 125)
-        );
-        assert_eq!(
-            screen[(column, row - 1)].bg,
-            ratatui::style::Color::Rgb(84, 70, 125)
-        );
-    }
+    assert_file_result_is_visible(&screen, tool_path);
 }
 
 #[tokio::test]
@@ -152,8 +160,12 @@ async fn user_reads_multiple_files() {
                     == heading
             })
             .expect("the file request is visible");
-        let result = (0..screen.area.width)
+        let separator = (0..screen.area.width)
             .map(|column| screen[(column, row + 1)].symbol())
+            .collect::<String>();
+        assert_eq!(separator.trim(), "");
+        let result = (0..screen.area.width)
+            .map(|column| screen[(column, row + 2)].symbol())
             .collect::<String>();
         assert!(
             result.trim_start().starts_with("1  "),
@@ -369,15 +381,33 @@ async fn user_reads_source_file() {
         .collect::<String>();
     let keyword = u16::try_from(line.find("fn fibonacci").expect("the keyword is visible"))
         .expect("the keyword fits on screen");
-    assert_ne!(screen[(keyword, row)].fg, screen[(keyword + 3, row)].fg);
+    assert_eq!(
+        screen[(keyword, row)].fg,
+        ratatui::style::Color::Rgb(200, 78, 78)
+    );
+    assert_eq!(
+        screen[(keyword + 3, row)].fg,
+        ratatui::style::Color::Rgb(87, 161, 109)
+    );
     send_response_bytes(
         &request,
         include_str!("../fixtures/openai/tools/user_reads_source_file/response-2.txt"),
     )
     .await;
-    application
-        .wait_for_screen(|screen| read_history(screen).contains("fn fibonacci(number: u32) -> u64"))
+    let screen = application
+        .wait_for_screen(|screen| {
+            (0..screen.area.height)
+                .any(|row| screen[(0, row)].symbol() == "f" && screen[(1, row)].symbol() == "n")
+        })
         .await;
+    let row = (0..screen.area.height)
+        .find(|row| screen[(0, *row)].symbol() == "f" && screen[(1, *row)].symbol() == "n")
+        .expect("the response code is visible");
+    assert_eq!(screen[(0, row)].fg, ratatui::style::Color::Rgb(200, 78, 78));
+    assert_eq!(
+        screen[(3, row)].fg,
+        ratatui::style::Color::Rgb(87, 161, 109)
+    );
 }
 
 #[tokio::test]

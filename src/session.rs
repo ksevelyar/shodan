@@ -187,11 +187,13 @@ impl Session {
             .join(format!("{context}.md"));
         let context_prompt = std::fs::read_to_string(context_path).unwrap_or_default();
         let project_prompt = std::fs::read_to_string("AGENTS.md").unwrap_or_default();
+        let context_prompt = context_prompt.trim_matches('\n');
+        let project_prompt = project_prompt.trim_start_matches('\n');
         [context_prompt, project_prompt]
             .into_iter()
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n\n")
     }
 
     pub(crate) fn cycle_context(&mut self, new_session: bool) {

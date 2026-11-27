@@ -1,10 +1,11 @@
 # Shodan [![CI](https://github.com/ksevelyar/shodan/actions/workflows/ci.yml/badge.svg)](https://github.com/ksevelyar/shodan/actions/workflows/ci.yml)
 
+![](doc/shodan-1.png)
+![](doc/shodan-2.png)
+
 Shodan is a console agent inspired by pi.
 
 It uses switchable system prompts instead of skills. Users can choose the instructions needed for a task and conserve tokens, allowing [local inference](https://github.com/ksevelyar/playground-inference) models to perform better.
-
-![Shodan chat interface](doc/shodan.png)
 
 ## Documentation
 * [Architecture](doc/architecture.md)

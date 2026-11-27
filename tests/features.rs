@@ -13,5 +13,6 @@ mod features {
     mod single_prompt;
     mod status_panel;
     mod support;
+    mod theme;
     mod tools;
 }

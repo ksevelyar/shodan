@@ -49,6 +49,34 @@ async fn wait_for_tool_process_death(command_pattern: &str) {
     panic!("the aborted command keeps running: {command_pattern}");
 }
 
+fn assert_command_and_result_are_visible(screen: &ratatui::buffer::Buffer) {
+    let command_row = (0..screen.area.height)
+        .find(|row| {
+            (0..screen.area.width)
+                .map(|column| screen[(column, *row)].symbol())
+                .collect::<String>()
+                .starts_with("$ echo hello")
+        })
+        .expect("the command is visible");
+    for row in [command_row, command_row + 2] {
+        for column in 0..screen.area.width {
+            assert_eq!(
+                screen[(column, row)].bg,
+                ratatui::style::Color::Rgb(27, 22, 31)
+            );
+        }
+    }
+    let separator = (0..screen.area.width)
+        .map(|column| screen[(column, command_row + 1)].symbol())
+        .collect::<String>();
+    assert_eq!(separator.trim(), "");
+    let output = (0..screen.area.width)
+        .map(|column| screen[(column, command_row + 2)].symbol())
+        .collect::<String>();
+    assert_eq!(output.trim(), "hello");
+    assert_ne!(screen[(2, command_row)].fg, screen[(7, command_row)].fg);
+}
+
 #[tokio::test]
 async fn user_runs_command() {
     let (address, mut requests) = inkling_server()
@@ -96,27 +124,7 @@ async fn user_runs_command() {
             history.contains("$ echo hello") && history.matches("hello").count() >= 3
         })
         .await;
-    let command_row = (0..screen.area.height)
-        .find(|row| {
-            (0..screen.area.width)
-                .map(|column| screen[(column, *row)].symbol())
-                .collect::<String>()
-                .starts_with("$ echo hello")
-        })
-        .expect("the command is visible");
-    for row in [command_row, command_row + 1] {
-        for column in 0..screen.area.width {
-            assert_eq!(
-                screen[(column, row)].bg,
-                ratatui::style::Color::Rgb(84, 70, 125)
-            );
-        }
-    }
-    let output = (0..screen.area.width)
-        .map(|column| screen[(column, command_row + 1)].symbol())
-        .collect::<String>();
-    assert_eq!(output.trim(), "hello");
-    assert_ne!(screen[(2, command_row)].fg, screen[(7, command_row)].fg);
+    assert_command_and_result_are_visible(&screen);
     let messages = second_request.body["messages"]
         .as_array()
         .expect("the conversation is an array");
@@ -212,7 +220,7 @@ async fn user_is_informed_when_command_fails() {
     for column in 0..screen.area.width {
         assert_eq!(
             screen[(column, command_row)].bg,
-            ratatui::style::Color::Rgb(125, 48, 48)
+            ratatui::style::Color::Rgb(200, 78, 78)
         );
     }
     let failure_row = (command_row + 1..screen.area.height)
@@ -225,7 +233,11 @@ async fn user_is_informed_when_command_fails() {
         .expect("the failure is visible");
     assert_eq!(
         screen[(0, failure_row)].bg,
-        ratatui::style::Color::Rgb(125, 48, 48)
+        ratatui::style::Color::Rgb(200, 78, 78)
+    );
+    assert_eq!(
+        screen[(0, failure_row)].fg,
+        ratatui::style::Color::Rgb(27, 22, 31)
     );
     let messages = second_request.body["messages"]
         .as_array()

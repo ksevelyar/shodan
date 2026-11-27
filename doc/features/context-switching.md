@@ -7,7 +7,7 @@
 * The top panel shows the current context.
 * Read provides all tools except edit and write. Edit, review, and blank provide all tools.
 * Read, edit, and review use their respective prompts from `~/.shodan/read.md`, `~/.shodan/edit.md`, and `~/.shodan/review.md`.
-* Shodan appends the project directory's `AGENTS.md` to each nonblank context prompt, separated by a newline.
+* Shodan appends the project directory's `AGENTS.md` to each nonblank context prompt, separated by one empty line.
 * On startup, Shodan creates missing read, edit, and review prompt files as empty files and preserves existing prompt files.
 * Prompt files that cannot be created or read contribute no text.
 * Blank has an empty system prompt.

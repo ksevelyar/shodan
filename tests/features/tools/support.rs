@@ -93,7 +93,7 @@ pub(crate) fn prepare_scenario(directory: &str, scenario: &str) -> std::path::Pa
 
 pub(crate) fn read_tool_history(screen: &ratatui::buffer::Buffer) -> String {
     (0..screen.area.height.saturating_sub(4))
-        .filter(|&row| screen[(0, row)].bg != ratatui::style::Color::Rgb(55, 55, 55))
+        .filter(|&row| screen[(0, row)].bg != ratatui::style::Color::Rgb(35, 30, 39))
         .map(|row| {
             (0..screen.area.width)
                 .map(|column| screen[(column, row)].symbol())

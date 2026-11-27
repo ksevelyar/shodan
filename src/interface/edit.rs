@@ -5,22 +5,22 @@ use ratatui::{
     text::{Line, Span},
 };
 use similar::{ChangeTag, TextDiff};
-use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
+use syntect::{easy::HighlightLines, parsing::SyntaxSet};
+
+use super::theme::{Palette, get_syntax_theme};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::tools::EditDisplay;
 
 fn highlight_source(content: &str, path: &str) -> Vec<Vec<(syntect::highlighting::Style, String)>> {
     static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
-    static THEMES: OnceLock<ThemeSet> = OnceLock::new();
     let syntaxes = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
-    let themes = THEMES.get_or_init(ThemeSet::load_defaults);
     let syntax = Path::new(path)
         .extension()
         .and_then(|extension| extension.to_str())
         .and_then(|extension| syntaxes.find_syntax_by_extension(extension))
         .unwrap_or_else(|| syntaxes.find_syntax_plain_text());
-    let mut highlighter = HighlightLines::new(syntax, &themes.themes["base16-ocean.dark"]);
+    let mut highlighter = HighlightLines::new(syntax, get_syntax_theme());
     content
         .split_inclusive('\n')
         .map(|line| {
@@ -37,13 +37,14 @@ fn highlight_source(content: &str, path: &str) -> Vec<Vec<(syntect::highlighting
 fn format_diff_line(
     prefix: &str,
     segments: &[(syntect::highlighting::Style, String)],
+    foreground: Color,
     background: Color,
     width: usize,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let mut spans = vec![Span::styled(
         prefix.to_owned(),
-        Style::default().fg(Color::Gray).bg(background),
+        Style::default().fg(foreground).bg(background),
     )];
     let mut used_width = prefix.width();
     for (style, text) in segments {
@@ -94,28 +95,46 @@ pub(super) fn format_edit_result(display: &EditDisplay, width: usize) -> Vec<Lin
         }
         for operation in group {
             for change in diff.iter_changes(operation) {
-                let (marker, number, segments, background) = match change.tag() {
+                let background = Color::from(Palette::Background);
+                let (marker, number, segments, foreground) = match change.tag() {
                     ChangeTag::Delete => {
                         let index = change
                             .old_index()
                             .expect("deleted lines have original positions");
-                        ('-', index + 1, &original[index], Color::Rgb(86, 35, 44))
+                        (
+                            '-',
+                            index + 1,
+                            &original[index],
+                            Color::from(Palette::Error),
+                        )
                     }
                     ChangeTag::Insert => {
                         let index = change
                             .new_index()
                             .expect("added lines have updated positions");
-                        ('+', index + 1, &updated[index], Color::Rgb(29, 75, 55))
+                        (
+                            '+',
+                            index + 1,
+                            &updated[index],
+                            Color::from(Palette::Addition),
+                        )
                     }
                     ChangeTag::Equal => {
                         let index = change
                             .old_index()
                             .expect("context lines have original positions");
-                        (' ', index + 1, &original[index], Color::Rgb(55, 55, 55))
+                        (
+                            ' ',
+                            index + 1,
+                            &original[index],
+                            Color::from(Palette::SecondaryText),
+                        )
                     }
                 };
                 let prefix = format!("{marker} {number:>number_width$}  ");
-                lines.extend(format_diff_line(&prefix, segments, background, width));
+                lines.extend(format_diff_line(
+                    &prefix, segments, foreground, background, width,
+                ));
             }
         }
     }

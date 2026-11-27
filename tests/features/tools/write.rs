@@ -61,7 +61,7 @@ async fn user_writes_source_file() {
     for column in 0..screen.area.width {
         assert_eq!(
             screen[(column, row)].bg,
-            ratatui::style::Color::Rgb(84, 70, 125)
+            ratatui::style::Color::Rgb(27, 22, 31)
         );
     }
 }

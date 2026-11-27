@@ -26,6 +26,8 @@ pub(crate) enum Message {
         call_id: String,
         content: String,
         display: Option<tools::ToolDisplay>,
+        #[serde(default)]
+        successful: Option<bool>,
     },
     FailedResponse(String),
 }
@@ -138,16 +140,21 @@ fn start_next_tool(application: &mut Application) {
     let event_sender = application.event_sender.clone();
     let allowed = tools::is_available(&call.name, application.session.get_context_name() == "read");
     application.active_request = Some(tokio::spawn(async move {
-        let (content, display) = if allowed {
+        let (content, display, successful) = if allowed {
             tools::execute(&call.name, &call.arguments).await
         } else {
-            ("Error: tool unavailable in read context".to_owned(), None)
+            (
+                "Error: tool unavailable in read context".to_owned(),
+                None,
+                false,
+            )
         };
         let _ = event_sender.send(Event::ToolCompleted {
             turn,
             call_id: call.id,
             content,
             display,
+            successful,
         });
     }));
 }
@@ -272,12 +279,14 @@ pub(crate) fn apply_event(application: &mut Application, event: Event) {
             call_id,
             content,
             display,
+            successful,
         } if turn == application.session.turn && application.response_started.is_some() => {
             application.active_request = None;
             application.session.messages.push(Message::ToolResult {
                 call_id,
                 content,
                 display,
+                successful: Some(successful),
             });
             save_session(application);
             start_next_tool(application);

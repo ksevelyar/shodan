@@ -145,7 +145,7 @@ async fn user_reads_markdown_in_message() {
     assert!(screen[(0, row)].modifier.contains(Modifier::BOLD));
     assert!(screen[(11, row)].modifier.contains(Modifier::BOLD));
     assert!(!screen[(16, row)].modifier.contains(Modifier::ITALIC));
-    assert_ne!(screen[(22, row)].fg, screen[(16, row)].fg);
+    assert_eq!(screen[(22, row)].fg, Color::Rgb(213, 170, 42));
 }
 
 #[tokio::test]
@@ -174,6 +174,7 @@ async fn user_reads_markdown_in_model_response() {
         })
         .expect("the heading is visible");
     assert!(screen[(0, row)].modifier.contains(Modifier::BOLD));
+    assert_eq!(screen[(0, row)].fg, Color::Rgb(213, 170, 42));
 }
 
 #[tokio::test]
@@ -300,7 +301,7 @@ async fn user_aborts_model_response() {
     assert_eq!(partial_response.trim(), "##");
     for column in 0.."Request was aborted".len() {
         let column = u16::try_from(column).expect("the notice fits in the terminal");
-        assert_eq!(screen[(column, notice_row)].fg, Color::Rgb(255, 16, 240));
+        assert_eq!(screen[(column, notice_row)].fg, Color::Rgb(200, 78, 78));
     }
     wait_for_response_disconnect(&first_request).await;
 
@@ -504,9 +505,13 @@ async fn user_watches_model_thinking() {
             .map(|column| screen[(column, row - 1)].symbol())
             .collect::<String>();
         assert_eq!(preceding_line.trim(), "");
+        let earlier_line = (0..screen.area.width)
+            .map(|column| screen[(column, row - 2)].symbol())
+            .collect::<String>();
+        assert_ne!(earlier_line.trim(), "");
         for column in 0..text.len() {
             let column = u16::try_from(column).expect("the thinking fits in the terminal");
-            assert_eq!(screen[(column, row)].fg, Color::Rgb(128, 128, 128));
+            assert_eq!(screen[(column, row)].fg, Color::Rgb(94, 107, 133));
         }
     }
     send_response_bytes(&first_request, &response[thinking_end..]).await;
@@ -561,7 +566,10 @@ async fn user_selects_visible_text() {
         .wait_for_screen(|screen| {
             [(2, 0), (0, 8), (0, 9), (0, 10), (5, 11)]
                 .iter()
-                .all(|position| screen[*position].modifier.contains(Modifier::REVERSED))
+                .all(|position| {
+                    screen[*position].bg == Color::Rgb(213, 170, 42)
+                        && screen[*position].fg == Color::Rgb(27, 22, 31)
+                })
         })
         .await;
 
@@ -570,9 +578,9 @@ async fn user_selects_visible_text() {
     application.scroll_mouse(MouseEventKind::Up(MouseButton::Left), 1, 9);
     application
         .wait_for_screen(|screen| {
-            screen[(1, 9)].modifier.contains(Modifier::REVERSED)
-                && screen[(7, 9)].modifier.contains(Modifier::REVERSED)
-                && !screen[(2, 0)].modifier.contains(Modifier::REVERSED)
+            screen[(1, 9)].bg == Color::Rgb(213, 170, 42)
+                && screen[(7, 9)].bg == Color::Rgb(213, 170, 42)
+                && screen[(2, 0)].bg == Color::Rgb(27, 22, 31)
         })
         .await;
 }
@@ -614,7 +622,7 @@ async fn user_scrolls_with_conversation_selection() {
     application.scroll_mouse(MouseEventKind::Drag(MouseButton::Left), 4, 2);
     application.scroll_mouse(MouseEventKind::Up(MouseButton::Left), 4, 2);
     application
-        .wait_for_screen(|screen| screen[(0, 2)].modifier.contains(Modifier::REVERSED))
+        .wait_for_screen(|screen| screen[(0, 2)].bg == Color::Rgb(213, 170, 42))
         .await;
     application.scroll_mouse(MouseEventKind::ScrollUp, 0, 9);
     application
@@ -624,8 +632,8 @@ async fn user_scrolls_with_conversation_selection() {
     application
         .wait_for_screen(|screen| {
             read_history(screen) == original_history
-                && screen[(0, 2)].modifier.contains(Modifier::REVERSED)
-                && screen[(4, 2)].modifier.contains(Modifier::REVERSED)
+                && screen[(0, 2)].bg == Color::Rgb(213, 170, 42)
+                && screen[(4, 2)].bg == Color::Rgb(213, 170, 42)
         })
         .await;
 }
@@ -668,7 +676,7 @@ async fn user_extends_selection_beyond_visible_conversation() {
     application
         .wait_for_screen(|screen| {
             read_history(screen) != original_history
-                && screen[(2, 0)].modifier.contains(Modifier::REVERSED)
+                && screen[(2, 0)].bg == Color::Rgb(213, 170, 42)
         })
         .await;
     application.scroll_mouse(MouseEventKind::Up(MouseButton::Left), 2, 0);
@@ -766,7 +774,7 @@ async fn user_composes_message() {
         for column in 0..screen.area.width {
             let cell = &screen[(column, row)];
             assert_eq!(cell.symbol(), "─");
-            assert_eq!(cell.fg, Color::Gray);
+            assert_eq!(cell.fg, Color::Rgb(94, 107, 133));
         }
     }
     application.press_key(KeyCode::Enter);
@@ -777,7 +785,7 @@ async fn user_composes_message() {
         .find(|&row| screen[(0, row)].symbol() == "H")
         .expect("the user message is visible");
     for column in 0..screen.area.width {
-        assert_eq!(screen[(column, row)].bg, Color::Rgb(55, 55, 55));
+        assert_eq!(screen[(column, row)].bg, Color::Rgb(27, 22, 31));
     }
 }
 

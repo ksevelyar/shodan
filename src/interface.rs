@@ -1,6 +1,7 @@
 mod edit;
 mod input;
 mod markdown;
+mod theme;
 
 pub(crate) use input::Input;
 
@@ -24,11 +25,12 @@ use ratatui::{
     Frame, Terminal,
     backend::Backend,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, Paragraph},
 };
-use syntect::{easy::HighlightLines, highlighting::ThemeSet, parsing::SyntaxSet};
+use syntect::{easy::HighlightLines, parsing::SyntaxSet};
+use theme::{Palette, get_syntax_theme};
 use tokio::io::AsyncWriteExt;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -73,28 +75,6 @@ pub(crate) async fn copy_to_clipboard(text: &str, command: Option<&[String]>) ->
     }
     drop(input);
     matches!(tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await, Ok(Ok(status)) if status.success())
-}
-
-enum Palette {
-    DarkGrey,
-    Grey,
-    ThinkingGrey,
-    Lavender,
-    Red,
-    Pink,
-}
-
-impl From<Palette> for Color {
-    fn from(color: Palette) -> Self {
-        match color {
-            Palette::DarkGrey => Self::Rgb(55, 55, 55),
-            Palette::Grey => Self::Gray,
-            Palette::ThinkingGrey => Self::Rgb(128, 128, 128),
-            Palette::Lavender => Self::Rgb(84, 70, 125),
-            Palette::Red => Self::Rgb(125, 48, 48),
-            Palette::Pink => Self::Rgb(255, 16, 240),
-        }
-    }
 }
 
 enum BracketedPaste {
@@ -272,6 +252,7 @@ pub(crate) fn restore_terminal<BackendType: Backend, EventSource>(
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 enum SelectionRow {
     Top,
+    Separator,
     Conversation(usize),
     Panel(u16),
 }
@@ -312,7 +293,7 @@ where
             let conversation_height = frame
                 .area()
                 .height
-                .saturating_sub(input_height.saturating_add(4));
+                .saturating_sub(input_height.saturating_add(5));
             draw_selection(
                 frame,
                 &mut application.selection,
@@ -493,16 +474,18 @@ fn get_selection_position(
     }
     let row = mouse.row.clamp(area.y, area.bottom() - 1) - area.y;
     let input_height = application.input.get_height(area.width, area.height);
-    let conversation_height = area.height.saturating_sub(input_height.saturating_add(4));
+    let conversation_height = area.height.saturating_sub(input_height.saturating_add(5));
     let selection_row = if row == 0 {
         SelectionRow::Top
-    } else if row <= conversation_height {
+    } else if row == 1 {
+        SelectionRow::Separator
+    } else if row <= conversation_height + 1 {
         let viewport_start = application
             .maximum_scroll
             .saturating_sub(application.scroll_from_bottom);
-        SelectionRow::Conversation(viewport_start + usize::from(row - 1))
+        SelectionRow::Conversation(viewport_start + usize::from(row - 2))
     } else {
-        SelectionRow::Panel(row - conversation_height - 1)
+        SelectionRow::Panel(row - conversation_height - 2)
     };
     Some(SelectionPosition {
         row: selection_row,
@@ -587,13 +570,13 @@ pub(crate) fn advance_selection_scroll(application: &mut Application) {
     };
     let area = application.screen_area;
     let input_height = application.input.get_height(area.width, area.height);
-    let conversation_height = area.height.saturating_sub(input_height.saturating_add(4));
+    let conversation_height = area.height.saturating_sub(input_height.saturating_add(5));
     if conversation_height == 0 {
         return;
     }
-    if mouse.row <= area.y + 1 {
+    if mouse.row <= area.y + 2 {
         scroll_up(application, 1);
-    } else if mouse.row == area.y + conversation_height {
+    } else if mouse.row == area.y + conversation_height + 1 {
         scroll_down(application, 1);
     } else {
         return;
@@ -621,10 +604,12 @@ fn draw_selection(
     for row in 0..area.height {
         let selection_row = if row == 0 {
             SelectionRow::Top
-        } else if row <= conversation_height {
-            SelectionRow::Conversation(viewport_start + usize::from(row - 1))
+        } else if row == 1 {
+            SelectionRow::Separator
+        } else if row <= conversation_height + 1 {
+            SelectionRow::Conversation(viewport_start + usize::from(row - 2))
         } else {
-            SelectionRow::Panel(row - conversation_height - 1)
+            SelectionRow::Panel(row - conversation_height - 2)
         };
         for column in 0..area.width {
             let position = SelectionPosition {
@@ -657,7 +642,8 @@ fn draw_selection(
         }
     }
     for position in positions {
-        buffer[position].set_style(Style::default().add_modifier(Modifier::REVERSED));
+        buffer[position].set_fg(Color::from(Palette::Background));
+        buffer[position].set_bg(Color::from(Palette::Yellow));
     }
 }
 
@@ -675,33 +661,21 @@ fn scroll_down(application: &mut Application, lines: usize) {
         .saturating_sub(lines);
 }
 
-fn format_model_message(
-    content: &str,
-    thinking: &str,
-    tool_calls: &[ToolCall],
-) -> Vec<(String, Style)> {
+fn format_model_message(content: &str, thinking: &str) -> Vec<(String, Style)> {
     let mut sections = Vec::new();
     if !thinking.is_empty() {
         sections.push((
-            thinking.to_owned(),
-            Style::default().fg(Color::from(Palette::ThinkingGrey)),
+            thinking.trim_end_matches('\n').to_owned(),
+            Style::default().fg(Color::from(Palette::MutedText)),
         ));
     }
     if !content.is_empty() {
         sections.push((content.to_owned(), Style::default()));
     }
-    if sections.is_empty() && tool_calls.is_empty() {
-        sections.push((String::new(), Style::default()));
-    }
     sections
 }
 
-fn wrap_message_section(
-    content: &str,
-    style: Style,
-    user: bool,
-    width: usize,
-) -> Vec<Line<'static>> {
+fn wrap_message_section(content: &str, style: Style, width: usize) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for line in content.split('\n') {
         let wrapped_lines = if line.is_empty() {
@@ -712,20 +686,7 @@ fn wrap_message_section(
             textwrap::wrap(line, options)
         };
         for wrapped_line in wrapped_lines {
-            let (line, line_style) = if user || style.bg.is_some() {
-                let padding = width.saturating_sub(wrapped_line.width());
-                (
-                    format!("{wrapped_line}{}", " ".repeat(padding)),
-                    if user {
-                        Style::default().bg(Color::from(Palette::DarkGrey))
-                    } else {
-                        style
-                    },
-                )
-            } else {
-                (wrapped_line.into_owned(), style)
-            };
-            lines.push(Line::from(line).style(line_style));
+            lines.push(Line::from(wrapped_line.into_owned()).style(style));
         }
     }
     lines
@@ -733,13 +694,11 @@ fn wrap_message_section(
 
 fn format_bash_command(command: &str, background: Color, width: usize) -> Vec<Line<'static>> {
     static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
-    static THEMES: OnceLock<ThemeSet> = OnceLock::new();
     let syntaxes = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
-    let themes = THEMES.get_or_init(ThemeSet::load_defaults);
     let syntax = syntaxes
         .find_syntax_by_extension("sh")
         .expect("Bash syntax is available");
-    let mut highlighter = HighlightLines::new(syntax, &themes.themes["base16-ocean.dark"]);
+    let mut highlighter = HighlightLines::new(syntax, get_syntax_theme());
     let mut lines = Vec::new();
     let mut spans = vec![Span::styled("$ ", Style::default().bg(background))];
     let mut used_width = 2;
@@ -748,7 +707,11 @@ fn format_bash_command(command: &str, background: Color, width: usize) -> Vec<Li
             .highlight_line(line, syntaxes)
             .unwrap_or_else(|_| vec![(syntect::highlighting::Style::default(), line)]);
         for (style, text) in segments {
-            let foreground = Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b);
+            let foreground = if background == Color::from(Palette::Error) {
+                Color::from(Palette::Background)
+            } else {
+                Color::Rgb(style.foreground.r, style.foreground.g, style.foreground.b)
+            };
             let mut fragment = String::new();
             for character in text.chars() {
                 let character_width = character.width().unwrap_or(0);
@@ -787,16 +750,13 @@ fn format_bash_command(command: &str, background: Color, width: usize) -> Vec<Li
 
 fn format_read_result(content: &str, display: &ReadDisplay, width: usize) -> Vec<Line<'static>> {
     static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
-    static THEMES: OnceLock<ThemeSet> = OnceLock::new();
     let syntaxes = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
-    let themes = THEMES.get_or_init(ThemeSet::load_defaults);
     let syntax = Path::new(&display.path)
         .extension()
         .and_then(|extension| extension.to_str())
         .and_then(|extension| syntaxes.find_syntax_by_extension(extension))
         .unwrap_or_else(|| syntaxes.find_syntax_plain_text());
-    let theme = &themes.themes["base16-ocean.dark"];
-    let mut highlighter = HighlightLines::new(syntax, theme);
+    let mut highlighter = HighlightLines::new(syntax, get_syntax_theme());
     for line in display.preceding_content.split_inclusive('\n') {
         let _ = highlighter.highlight_line(line, syntaxes);
     }
@@ -804,13 +764,15 @@ fn format_read_result(content: &str, display: &ReadDisplay, width: usize) -> Vec
     let number_width = (display.offset + line_count.saturating_sub(1))
         .to_string()
         .len();
-    let background = Color::from(Palette::Lavender);
+    let background = Color::from(Palette::Background);
     let mut output = Vec::new();
     for (position, line) in content.split_inclusive('\n').enumerate() {
         let prefix = format!("{:>number_width$}  ", display.offset + position);
         let mut spans = vec![Span::styled(
             prefix.clone(),
-            Style::default().fg(Color::Gray).bg(background),
+            Style::default()
+                .fg(Color::from(Palette::SecondaryText))
+                .bg(background),
         )];
         let mut used_width = prefix.width();
         let styled_segments = highlighter
@@ -859,16 +821,13 @@ fn get_tool_call_background(call: &ToolCall, messages: &[Message]) -> Color {
         .find_map(|message| match message {
             Message::ToolResult {
                 call_id,
-                display: Some(ToolDisplay::Bash { successful }),
+                successful,
+                display,
                 ..
-            } if call_id == &call.id => Some(Color::from(if *successful {
-                Palette::Lavender
-            } else {
-                Palette::Red
-            })),
+            } if call_id == &call.id => Some(get_tool_background(*successful, display.as_ref())),
             _ => None,
         })
-        .unwrap_or_else(|| Color::from(Palette::Lavender))
+        .unwrap_or_else(|| Color::from(Palette::Background))
 }
 
 fn format_tool_calls(
@@ -898,16 +857,21 @@ fn format_tool_calls(
                 call.name,
                 path.as_deref().unwrap_or(&call.arguments)
             );
+            let foreground = if background == Color::from(Palette::Error) {
+                Color::from(Palette::Background)
+            } else {
+                Color::from(Palette::Text)
+            };
             lines.extend(wrap_message_section(
                 &content,
-                Style::default().bg(background),
-                false,
+                Style::default().fg(foreground).bg(background),
                 width,
             ));
         }
         if let Some(result) = messages.iter().find(
             |message| matches!(message, Message::ToolResult { call_id, .. } if call_id == &call.id),
         ) {
+            lines.push(Line::default());
             lines.extend(format_messages(std::slice::from_ref(result), &[], width));
         }
     }
@@ -921,16 +885,16 @@ fn format_conversation_section(
     message: &Message,
     width: usize,
 ) -> Vec<Line<'static>> {
-    let markdown_message = user || matches!(message, Message::Model { .. });
+    let markdown_message = user || matches!(message, Message::System(_) | Message::Model { .. });
     if markdown_message {
-        let message_style = if user {
-            style.bg(Color::from(Palette::DarkGrey))
+        let message_style = if user || matches!(message, Message::System(_)) {
+            style.fg(Color::from(Palette::Yellow))
         } else {
             style
         };
         markdown::format_markdown(content, message_style, width)
     } else {
-        wrap_message_section(content, style, user, width)
+        wrap_message_section(content, style, width)
     }
 }
 
@@ -954,6 +918,28 @@ fn format_file_result(message: &Message, width: usize) -> Option<Vec<Line<'stati
         }
         _ => None,
     }
+}
+
+fn get_tool_background(successful: Option<bool>, display: Option<&ToolDisplay>) -> Color {
+    let successful = successful.unwrap_or(!matches!(
+        display,
+        Some(ToolDisplay::Bash { successful: false })
+    ));
+    Color::from(if successful {
+        Palette::Background
+    } else {
+        Palette::Error
+    })
+}
+
+fn get_tool_result_style(successful: Option<bool>, display: Option<&ToolDisplay>) -> Style {
+    let background = get_tool_background(successful, display);
+    let foreground = if background == Color::from(Palette::Error) {
+        Color::from(Palette::Background)
+    } else {
+        Color::from(Palette::Text)
+    };
+    Style::default().fg(foreground).bg(background)
 }
 
 fn format_messages(
@@ -983,34 +969,29 @@ fn format_messages(
             continue;
         }
         let (sections, user, aborted) = match message {
-            Message::System(content) => (vec![(content.clone(), Style::default())], false, false),
+            Message::System(content) => (
+                vec![(content.trim_end_matches('\n').to_owned(), Style::default())],
+                false,
+                false,
+            ),
             Message::User(content) => (vec![(content.clone(), Style::default())], true, false),
-            Message::FailedResponse(content) => {
-                (vec![(content.clone(), Style::default())], false, false)
-            }
-            Message::ToolResult {
-                content,
-                display: Some(ToolDisplay::Bash { successful }),
-                ..
-            } => {
-                let background = Color::from(if *successful {
-                    Palette::Lavender
-                } else {
-                    Palette::Red
-                });
-                (
-                    vec![(
-                        content.trim_end_matches('\n').to_owned(),
-                        Style::default().bg(background),
-                    )],
-                    false,
-                    false,
-                )
-            }
-            Message::ToolResult { content, .. } => (
+            Message::FailedResponse(content) => (
                 vec![(
                     content.clone(),
-                    Style::default().bg(Color::from(Palette::Lavender)),
+                    Style::default().fg(Color::from(Palette::Error)),
+                )],
+                false,
+                false,
+            ),
+            Message::ToolResult {
+                content,
+                successful,
+                display,
+                ..
+            } => (
+                vec![(
+                    content.trim_end_matches('\n').to_owned(),
+                    get_tool_result_style(*successful, display.as_ref()),
                 )],
                 false,
                 false,
@@ -1018,33 +999,33 @@ fn format_messages(
             Message::Model {
                 content,
                 thinking,
-                tool_calls,
                 aborted,
                 ..
-            } => (
-                format_model_message(content, thinking, tool_calls),
-                false,
-                *aborted,
-            ),
+            } => (format_model_message(content, thinking), false, *aborted),
         };
-        for (content, style) in sections {
+        for (position, (content, style)) in sections.into_iter().enumerate() {
+            if position > 0 {
+                lines.push(Line::default());
+            }
             lines.extend(format_conversation_section(
                 &content, style, user, message, width,
             ));
         }
         if let Message::Model { tool_calls, .. } = message {
+            if !tool_calls.is_empty() && !lines.is_empty() {
+                lines.push(Line::default());
+            }
             lines.extend(format_tool_calls(tool_calls, conversation, width));
         }
         if aborted {
             for line in textwrap::wrap("Request was aborted", width) {
                 lines.push(
                     Line::from(line.into_owned())
-                        .style(Style::default().fg(Color::from(Palette::Pink))),
+                        .style(Style::default().fg(Color::from(Palette::Error))),
                 );
             }
         }
-        if !matches!(message, Message::Model { tool_calls, .. } if tool_calls.len() == 1 && tool_calls[0].name == "bash")
-        {
+        if lines.last().is_some_and(|line| !line.spans.is_empty()) {
             lines.push(Line::default());
         }
     }
@@ -1097,15 +1078,29 @@ fn draw_interface(
     application: &mut Application,
     formatted_messages: &mut FormattedMessages,
 ) {
+    frame.render_widget(
+        Block::default().style(
+            Style::default()
+                .fg(Color::from(Palette::Text))
+                .bg(Color::from(Palette::Background)),
+        ),
+        frame.area(),
+    );
     let input_height = application
         .input
         .get_height(frame.area().width, frame.area().height);
     let statistics = &application.session.statistics;
     let scroll_from_bottom = &mut application.scroll_from_bottom;
     let maximum_scroll = &mut application.maximum_scroll;
-    let panels = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(frame.area());
+    let panels = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .split(frame.area());
     frame.render_widget(
-        Paragraph::new(application.session.get_context_name()),
+        Paragraph::new(application.session.get_context_name())
+            .style(Style::default().fg(Color::from(Palette::PanelText))),
         panels[0],
     );
     let areas = Layout::vertical([
@@ -1115,13 +1110,16 @@ fn draw_interface(
         Constraint::Length(1),
         Constraint::Length(1),
     ])
-    .split(panels[1]);
+    .split(panels[2]);
     let width = usize::from(areas[0].width).max(1);
     formatted_messages.update(&application.session.messages, width);
     let error_lines = application.error.as_ref().map_or_else(Vec::new, |error| {
         textwrap::wrap(&format!("Request failed: {error}"), width)
             .into_iter()
-            .map(|line| Line::from(line.into_owned()))
+            .map(|line| {
+                Line::from(line.into_owned())
+                    .style(Style::default().fg(Color::from(Palette::Error)))
+            })
             .collect::<Vec<_>>()
     });
     let line_count = formatted_messages
@@ -1150,10 +1148,10 @@ fn draw_interface(
         .cloned()
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(visible), areas[0]);
-    for area in [areas[1], areas[3]] {
+    for area in [panels[1], areas[1], areas[3]] {
         let line = "─".repeat(usize::from(area.width));
         frame.render_widget(
-            Paragraph::new(line).style(Style::default().fg(Color::from(Palette::Grey))),
+            Paragraph::new(line).style(Style::default().fg(Color::from(Palette::MutedText))),
             area,
         );
     }
@@ -1210,6 +1208,10 @@ fn draw_status(
     });
     let provider = session.provider.get_name();
     let right = format!("{provider} {}{thinking_level}", model.name);
+    frame.render_widget(
+        Block::default().style(Style::default().fg(Color::from(Palette::PanelText))),
+        area,
+    );
     let right_width = u16::try_from(right.width()).unwrap_or(u16::MAX);
     let status_areas =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(right_width)]).split(area);

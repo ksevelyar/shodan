@@ -7,6 +7,8 @@
 * User can scroll conversation history one line at a time with the mouse wheel anywhere in the terminal.
 * Model responses stream as they are generated.
 * User sees model thinking in grey with Markdown formatting as it streams, without a label.
+* One empty line separates thinking from the preceding and following conversation sections.
+* One empty line separates a tool call from its result.
 * User sees each tool call followed by its result in the conversation.
 * Tool results appear without a label.
 * User can abort a request with Esc, stopping model processing and seeing `Request was aborted` in neon pink.
