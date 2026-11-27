@@ -441,10 +441,12 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
         KeyCode::Esc => abort_response(application),
         KeyCode::Tab if !matches!(application.mode, crate::settings::Mode::OpenaiLogin) => {
             abort_response(application);
-            application.session.cycle_context();
+            application
+                .session
+                .cycle_context(key.modifiers.contains(KeyModifiers::CONTROL));
             application.scroll_from_bottom = usize::MAX;
             application.selection = None;
-            application.error = None;
+            application.error = application.session.save(false).err();
         }
         KeyCode::Enter
             if application.pending_authorization.is_some() && !application.input.is_empty() =>
@@ -465,6 +467,11 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
         }
         KeyCode::Char(' ') if key.modifiers == KeyModifiers::CONTROL => {
             application.session.cycle_model();
+            if application.response_started.is_none()
+                && let Err(error) = application.session.save(false)
+            {
+                application.error = Some(error);
+            }
         }
         KeyCode::PageUp => scroll_up(application, 8),
         KeyCode::PageDown => scroll_down(application, 8),

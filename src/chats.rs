@@ -4,14 +4,14 @@ use tokio::time::Instant;
 
 use crate::{application::Application, events::Event, providers, tools};
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ToolCall {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) arguments: String,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Message {
     System(String),
     User(String),
@@ -47,11 +47,15 @@ fn append_model_message(application: &mut Application) {
 pub(crate) fn send_message(application: &mut Application, content: String) {
     application.session.turn = application.session.turn.wrapping_add(1);
     application.session.messages.push(Message::User(content));
+    application.error = None;
+    if let Err(error) = application.session.save(true) {
+        application.error = Some(error);
+        return;
+    }
     application.session.turn_start = application.session.messages.len();
     let messages = application.session.messages.clone();
     append_model_message(application);
     application.response_started = Some(Instant::now());
-    application.error = None;
     start_response(application, messages);
 }
 
@@ -118,6 +122,9 @@ pub(crate) fn abort_response(application: &mut Application) {
     application.pending_tool_calls.clear();
     application.response_started = None;
     mark_response_aborted(application);
+    if let Err(error) = application.session.save(false) {
+        application.error = Some(error);
+    }
 }
 
 fn start_next_tool(application: &mut Application) {
@@ -159,6 +166,27 @@ fn save_provider_items(application: &mut Application, items: Vec<serde_json::Val
     if let Some(Message::Model { provider_items, .. }) = application.session.messages.last_mut() {
         *provider_items = items;
     }
+}
+
+fn save_session(application: &mut Application) {
+    if let Err(error) = application.session.save(false) {
+        application.error = Some(error);
+    }
+}
+
+fn handle_failed_request(
+    application: &mut Application,
+    error: crate::application::ApplicationError,
+) {
+    application.active_request = None;
+    application.error = Some(error);
+    application.response_started = None;
+    let partial_response = take_partial_response(application);
+    application
+        .session
+        .messages
+        .push(Message::FailedResponse(partial_response));
+    save_session(application);
 }
 
 pub(crate) fn apply_event(application: &mut Application, event: Event) {
@@ -220,6 +248,7 @@ pub(crate) fn apply_event(application: &mut Application, event: Event) {
             application.statistics.prompt_tokens += prompt_tokens;
             application.statistics.cached_tokens += cached_tokens;
             application.statistics.completion_tokens += completion_tokens;
+            save_session(application);
             let Some(Message::Model { tool_calls, .. }) = application.session.messages.last()
             else {
                 return;
@@ -246,19 +275,13 @@ pub(crate) fn apply_event(application: &mut Application, event: Event) {
                 content,
                 display,
             });
+            save_session(application);
             start_next_tool(application);
         }
         Event::RequestFailed { turn, error }
             if turn == application.session.turn && application.response_started.is_some() =>
         {
-            application.active_request = None;
-            application.error = Some(error);
-            application.response_started = None;
-            let partial_response = take_partial_response(application);
-            application
-                .session
-                .messages
-                .push(Message::FailedResponse(partial_response));
+            handle_failed_request(application, error);
         }
         _ => {}
     }

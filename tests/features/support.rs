@@ -425,6 +425,13 @@ impl TestApplication {
             .expect("the application receives terminal input");
     }
 
+    pub fn press_control_tab(&self) {
+        let key = KeyEvent::new(KeyCode::Tab, KeyModifiers::CONTROL);
+        self.events
+            .send(Ok(Event::Key(key)))
+            .expect("the application receives terminal input");
+    }
+
     pub fn press_control_key(&self, character: char) {
         let key = KeyEvent::new(KeyCode::Char(character), KeyModifiers::CONTROL);
         self.events

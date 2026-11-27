@@ -104,6 +104,7 @@ pub struct ApplicationSettings {
     pub(crate) provider: ProviderSettings,
     pub(crate) mode: Mode,
     pub(crate) clipboard_command: Option<Vec<String>>,
+    pub(crate) session_number: Option<usize>,
 }
 
 impl ApplicationSettings {
@@ -127,6 +128,7 @@ struct Arguments {
     record: bool,
     login: bool,
     prompt: Option<String>,
+    session_number: Option<usize>,
 }
 
 #[doc = "# Errors\nReturns an error if arguments or configuration are invalid."]
@@ -144,8 +146,14 @@ pub fn build_settings(
     let settings = load_settings(&home_directory).map_err(|error| {
         ApplicationError::Configuration(format!("Failed to load configuration: {error}"))
     })?;
+    let saved_selection = arguments
+        .session_number
+        .map(|number| Session::get_saved_selection(&home_directory, number))
+        .transpose()?;
     let provider = if arguments.login {
         Some("openai")
+    } else if let Some((provider, _)) = &saved_selection {
+        Some(provider.as_str())
     } else {
         arguments.provider.as_deref()
     };
@@ -167,7 +175,7 @@ pub fn build_settings(
             home_directory,
             models: selection.models,
             default_model: selection.default_model,
-            model_override: arguments.model,
+            model_override: saved_selection.map_or(arguments.model, |(_, model)| Some(model)),
             proxy: settings
                 .proxy
                 .as_ref()
@@ -178,6 +186,7 @@ pub fn build_settings(
         },
         mode,
         clipboard_command: settings.clipboard_command,
+        session_number: arguments.session_number,
     };
     Session::select_model_position(&application_settings.provider)?;
     Ok(application_settings)
@@ -213,6 +222,17 @@ fn parse_arguments(arguments: impl IntoIterator<Item = String>) -> io::Result<Ar
             "--prompt" => {
                 parsed.prompt = Some(arguments.next().ok_or_else(|| {
                     io::Error::new(io::ErrorKind::InvalidInput, "--prompt requires a value")
+                })?);
+            }
+            "--session" => {
+                let value = arguments.next().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "--session requires a number")
+                })?;
+                parsed.session_number = Some(value.parse().map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("invalid session number: {value}"),
+                    )
                 })?);
             }
             "--record" => parsed.record = true,

@@ -49,21 +49,21 @@ struct DirectoryArguments {
     path: String,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ToolDisplay {
     Read(ReadDisplay),
     Edit(EditDisplay),
     Bash { successful: bool },
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EditDisplay {
     pub path: String,
     pub original: String,
     pub updated: String,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ReadDisplay {
     pub path: String,
     pub offset: usize,

@@ -8,6 +8,7 @@ mod features {
     mod provider_selection;
     mod proxy;
     mod responses_recording;
+    mod sessions;
     mod settings;
     mod single_prompt;
     mod status_panel;

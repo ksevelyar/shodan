@@ -84,7 +84,7 @@ impl Drop for Application {
 
 #[doc = "# Errors\nReturns an error if the provider client cannot be initialized."]
 pub fn build(settings: ApplicationSettings) -> Result<(Application, Events), ApplicationError> {
-    let mut session = Session::build(settings.provider)?;
+    let mut session = Session::build(settings.provider, settings.session_number)?;
     if matches!(settings.mode, Mode::OpenaiLogin) {
         session.messages.clear();
     }

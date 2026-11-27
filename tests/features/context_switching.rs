@@ -16,8 +16,14 @@ async fn user_starts_session_with_project_instructions() {
         "default_provider": "llama",
         "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}
     }));
-    std::fs::write(home.path().join(".shodan/read.md"), "Read instructions")
-        .expect("the read prompt can be written");
+    for (context, prompt) in [
+        ("read", "Read instructions"),
+        ("edit", "Edit instructions"),
+        ("review", "Review instructions"),
+    ] {
+        std::fs::write(home.path().join(format!(".shodan/{context}.md")), prompt)
+            .expect("the context prompt can be written");
+    }
     let settings = build_settings(home.path().to_owned(), Vec::new()).expect("settings are valid");
     let mut application = run_test_application(settings);
     application
@@ -26,6 +32,15 @@ async fn user_starts_session_with_project_instructions() {
                 && read_history(screen).contains("Read instructions")
         })
         .await;
+    for (context, prompt) in [
+        ("read", "Read instructions"),
+        ("edit", "Edit instructions"),
+        ("review", "Review instructions"),
+    ] {
+        let contents = std::fs::read_to_string(home.path().join(format!(".shodan/{context}.md")))
+            .expect("the context prompt exists");
+        assert_eq!(contents, prompt);
+    }
     application.send_message("Hello");
     let request = receive_request(&mut requests).await;
     assert_eq!(
@@ -42,7 +57,7 @@ async fn user_starts_session_with_project_instructions() {
 }
 
 #[tokio::test]
-async fn user_switches_contexts() {
+async fn user_switches_contexts_and_keeps_conversation() {
     let (address, mut requests) = RecordedLlama::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
@@ -73,8 +88,9 @@ async fn user_switches_contexts() {
         request.body["messages"][0]["content"],
         format!("Edit instructions\n{}", include_str!("../../AGENTS.md"))
     );
-    assert_eq!(request.body["messages"][1]["role"], "assistant");
-    assert_eq!(request.body["messages"][2]["content"], "Continue");
+    assert_eq!(request.body["messages"][1]["content"], "Hello");
+    assert_eq!(request.body["messages"][2]["role"], "assistant");
+    assert_eq!(request.body["messages"][3]["content"], "Continue");
     assert_eq!(
         request.body["tools"]
             .as_array()
@@ -120,6 +136,49 @@ async fn user_switches_contexts() {
 }
 
 #[tokio::test]
+async fn user_starts_new_session_with_last_model_response() {
+    let (address, mut requests) = RecordedLlama::new().start().await;
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}
+    }));
+    let settings = build_settings(home.path().to_owned(), Vec::new()).expect("settings are valid");
+    let mut application = run_test_application(settings);
+    application.send_message("First");
+    let request = receive_request(&mut requests).await;
+    send_recorded_response(&request).await;
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains('⏱'))
+        .await;
+    application.press_control_tab();
+    application
+        .wait_for_screen(|screen| read_screen(screen).starts_with("edit"))
+        .await;
+    application.send_message("Continue");
+    let request = receive_request(&mut requests).await;
+    assert_eq!(request.body["messages"][1]["role"], "assistant");
+    assert_eq!(request.body["messages"][2]["content"], "Continue");
+    send_recorded_response(&request).await;
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains('⏱'))
+        .await;
+    drop(application);
+    let settings = build_settings(
+        home.path().to_owned(),
+        vec!["--session".to_owned(), "0".to_owned()],
+    )
+    .expect("settings are valid");
+    let mut application = run_test_application(settings);
+    application
+        .wait_for_screen(|screen| read_screen(screen).starts_with("edit"))
+        .await;
+    application.send_message("Next");
+    let request = receive_request(&mut requests).await;
+    assert_eq!(request.body["messages"][1]["role"], "assistant");
+    assert_eq!(request.body["messages"][2]["content"], "Continue");
+}
+
+#[tokio::test]
 async fn user_starts_without_prompt_files() {
     let (address, mut requests) = RecordedLlama::new().start().await;
     let home = create_home(serde_json::json!({
@@ -137,12 +196,41 @@ async fn user_starts_without_prompt_files() {
         .expect("Shodan starts");
     let request = receive_request(&mut requests).await;
     assert_eq!(request.body["messages"][0]["content"], "");
+    for context in ["read", "edit", "review"] {
+        let contents = std::fs::read_to_string(home.path().join(format!(".shodan/{context}.md")))
+            .expect("the context prompt exists");
+        assert_eq!(contents, "");
+    }
     send_recorded_response(&request).await;
     assert!(process.wait().await.expect("Shodan exits").success());
 }
 
 #[tokio::test]
-async fn user_switches_during_response() {
+async fn user_starts_with_unavailable_prompt_file() {
+    let (address, mut requests) = RecordedLlama::new().start().await;
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}
+    }));
+    std::fs::create_dir(home.path().join(".shodan/read.md"))
+        .expect("the read prompt path is a directory");
+    let mut process = tokio::process::Command::new(env!("CARGO_BIN_EXE_shodan"))
+        .env("HOME", home.path())
+        .current_dir(home.path())
+        .args(["--prompt", "Hello"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("Shodan starts");
+    let request = receive_request(&mut requests).await;
+    assert_eq!(request.body["messages"][0]["content"], "");
+    send_recorded_response(&request).await;
+    assert!(process.wait().await.expect("Shodan exits").success());
+}
+
+#[tokio::test]
+async fn user_switches_context_during_response() {
     let (address, mut requests) = RecordedLlama::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
@@ -174,8 +262,10 @@ async fn user_switches_during_response() {
             .as_array()
             .expect("messages are present")
             .len(),
-        3
+        5
     );
-    assert_eq!(request.body["messages"][1]["role"], "assistant");
-    assert_eq!(request.body["messages"][2]["content"], "Continue");
+    assert_eq!(request.body["messages"][1]["content"], "First");
+    assert_eq!(request.body["messages"][2]["role"], "assistant");
+    assert_eq!(request.body["messages"][3]["content"], "Second");
+    assert_eq!(request.body["messages"][4]["content"], "Continue");
 }

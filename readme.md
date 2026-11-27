@@ -13,6 +13,7 @@ It uses switchable system prompts instead of skills. Users can choose the instru
 ### Features
 * [Chat](doc/features/chat.md)
 * [Context switching](doc/features/context-switching.md)
+* [Sessions](doc/features/sessions.md)
 * [Run bash commands](doc/features/tools/bash.md)
 * [List directory](doc/features/tools/ls.md)
 * [Read file](doc/features/tools/read.md)
