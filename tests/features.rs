@@ -3,6 +3,7 @@ mod features {
     mod context_switching;
     mod interface;
     mod llama;
+    mod mcp;
     mod models;
     mod openai;
     mod provider_selection;

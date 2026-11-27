@@ -96,7 +96,12 @@ fn mark_response_aborted(application: &mut Application) {
 
 fn start_response(application: &mut Application, messages: Vec<Message>) {
     let mut provider = application.session.provider.clone();
-    provider.connection.read_context = application.session.get_context_name() == "read";
+    let mut available_tools =
+        tools::describe_tools(application.session.get_context_name() == "read");
+    if let Some(connection) = &application.blender_connection {
+        available_tools.extend(connection.definitions("blender_"));
+    }
+    provider.connection.tools = available_tools;
     let selected_model = application.session.get_selected_model();
     let model = selected_model.name.clone();
     let thinking_level = selected_model.thinking_level;
@@ -139,8 +144,20 @@ fn start_next_tool(application: &mut Application) {
     let turn = application.session.turn;
     let event_sender = application.event_sender.clone();
     let allowed = tools::is_available(&call.name, application.session.get_context_name() == "read");
+    let connection = application.blender_connection.clone();
     application.active_request = Some(tokio::spawn(async move {
-        let (content, display, successful) = if allowed {
+        let original_name = call.name.strip_prefix("blender_");
+        let (content, display, successful) = if let (Some(connection), Some(name)) = (
+            connection.as_ref(),
+            original_name.filter(|name| {
+                connection
+                    .as_ref()
+                    .is_some_and(|connection| connection.contains(name))
+            }),
+        ) {
+            let (content, successful) = connection.call(name, &call.arguments).await;
+            (content, None, successful)
+        } else if allowed {
             tools::execute(&call.name, &call.arguments).await
         } else {
             (

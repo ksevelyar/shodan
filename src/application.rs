@@ -63,6 +63,8 @@ pub struct Application {
     pub(crate) mode: Mode,
     pub(crate) pending_authorization: Option<mpsc::UnboundedSender<String>>,
     pub(crate) clipboard_command: Option<Vec<String>>,
+    pub(crate) blender_connection: Option<std::sync::Arc<crate::mcp::Connection>>,
+    blender_server_command: Option<Vec<String>>,
 }
 
 impl Drop for Application {
@@ -89,6 +91,8 @@ pub fn build(settings: ApplicationSettings) -> Result<(Application, Events), App
         pending_tool_calls: std::collections::VecDeque::new(),
         home_directory: settings.home_directory,
         clipboard_command: settings.clipboard_command,
+        blender_connection: None,
+        blender_server_command: settings.blender_server_command,
         mode: settings.mode,
         pending_authorization: None,
         input: interface::Input::default(),
@@ -111,6 +115,22 @@ where
     EventSource: Stream<Item = io::Result<Event>> + Unpin,
 {
     let (mut application, mut background_events) = build(settings)?;
+    if !matches!(application.mode, Mode::OpenaiLogin)
+        && let Some(command) = application.blender_server_command.take()
+    {
+        match crate::mcp::Connection::connect(&command).await {
+            Ok(connection) => application.blender_connection = Some(connection),
+            Err(error) => {
+                if matches!(application.mode, Mode::SinglePrompt(_)) {
+                    eprintln!("MCP connection failed: {error}");
+                } else {
+                    application.error = Some(ApplicationError::Tool(format!(
+                        "MCP connection failed: {error}"
+                    )));
+                }
+            }
+        }
+    }
     match &application.mode {
         Mode::SinglePrompt(prompt) => {
             let prompt = prompt.clone();

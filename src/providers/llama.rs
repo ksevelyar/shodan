@@ -4,7 +4,6 @@ use crate::{
     chats::{Message, ToolCall},
     events::{Event, EventSender},
     models::ThinkingLevel,
-    tools,
 };
 use eventsource_stream::{Event as ServerSentEvent, Eventsource};
 use futures_util::{Stream, StreamExt};
@@ -79,7 +78,15 @@ pub async fn stream_response(
     event_sender: &EventSender,
 ) {
     let result = async {
-        let events = post_messages(connection, address, model, thinking_level, messages).await?;
+        let events = post_messages(
+            connection,
+            address,
+            model,
+            thinking_level,
+            messages,
+            &connection.tools,
+        )
+        .await?;
         read_provider_events(events, turn, event_sender).await
     }
     .await;
@@ -94,6 +101,7 @@ async fn post_messages(
     model: &str,
     thinking_level: Option<ThinkingLevel>,
     messages: &[Message],
+    available_tools: &[serde_json::Value],
 ) -> Result<impl Stream<Item = Result<ServerSentEvent, ApplicationError>> + Unpin, ApplicationError>
 {
     let messages = messages
@@ -113,7 +121,7 @@ async fn post_messages(
             Message::ToolResult { call_id, content, .. } => Some(serde_json::json!({"role":"tool", "tool_call_id":call_id, "content":content})),
         })
         .collect::<Vec<_>>();
-    let mut request = serde_json::json!({"model": model, "messages": messages, "tools": tools::describe_tools(connection.read_context), "stream": true, "stream_options": {"include_usage": true}});
+    let mut request = serde_json::json!({"model": model, "messages": messages, "tools": available_tools, "stream": true, "stream_options": {"include_usage": true}});
     if let Some(thinking_level) = thinking_level {
         request["reasoning_effort"] = serde_json::json!(thinking_level.as_provider_value());
     }

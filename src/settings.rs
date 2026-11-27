@@ -105,9 +105,16 @@ pub struct ApplicationSettings {
     pub(crate) mode: Mode,
     pub(crate) clipboard_command: Option<Vec<String>>,
     pub(crate) session_number: Option<usize>,
+    pub(crate) blender_server_command: Option<Vec<String>>,
 }
 
 impl ApplicationSettings {
+    #[must_use]
+    pub fn with_blender_server_command(mut self, command: Option<Vec<String>>) -> Self {
+        self.blender_server_command = command;
+        self
+    }
+
     #[must_use]
     pub fn with_clipboard_command(mut self, command: Vec<String>) -> Self {
         self.clipboard_command = Some(command);
@@ -187,6 +194,7 @@ pub fn build_settings(
         mode,
         clipboard_command: settings.clipboard_command,
         session_number: arguments.session_number,
+        blender_server_command: Some(vec!["blender-mcp-server".to_owned()]),
     };
     Session::select_model_position(&application_settings.provider)?;
     Ok(application_settings)
