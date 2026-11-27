@@ -6,7 +6,7 @@ use tokio::{
     time::timeout,
 };
 
-use super::support::{RecordedLlama, create_home, receive_request, send_response_bytes};
+use super::support::{RecordedProvider, create_home, receive_request, send_response_bytes};
 
 fn start_shodan(home_directory: &std::path::Path, arguments: &[&str]) -> Child {
     Command::new(env!("CARGO_BIN_EXE_shodan"))
@@ -40,7 +40,7 @@ async fn collect_output(process: Child) -> std::process::Output {
 
 #[tokio::test]
 async fn user_submits_prompt() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(json!({
         "default_provider": "llama",
         "providers": {
@@ -93,7 +93,7 @@ async fn user_submits_prompt() {
 
 #[tokio::test]
 async fn user_selects_provider_and_model() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(json!({
         "default_provider": "openai",
         "providers": {
@@ -226,7 +226,7 @@ async fn user_combines_prompt_with_login() {
 
 #[tokio::test]
 async fn user_records_prompt() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(json!({
         "default_provider": "llama",
         "providers": {
@@ -270,7 +270,7 @@ async fn user_records_prompt() {
 
 #[tokio::test]
 async fn user_sees_response_recording_error() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(json!({
         "default_provider": "llama",
         "providers": {

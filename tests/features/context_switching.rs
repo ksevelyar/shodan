@@ -4,14 +4,14 @@ use crossterm::event::KeyCode;
 use shodan::settings::build_settings;
 
 use super::support::{
-    RecordedLlama, create_home, read_bottom_line, read_history, read_screen, receive_request,
+    RecordedProvider, create_home, read_bottom_line, read_history, read_screen, receive_request,
     run_test_application, send_initial_recorded_response, send_recorded_response,
     wait_for_response_disconnect,
 };
 
 #[tokio::test]
 async fn user_starts_session_with_project_instructions() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}
@@ -58,7 +58,7 @@ async fn user_starts_session_with_project_instructions() {
 
 #[tokio::test]
 async fn user_switches_contexts_and_keeps_conversation() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}
@@ -137,7 +137,7 @@ async fn user_switches_contexts_and_keeps_conversation() {
 
 #[tokio::test]
 async fn user_starts_new_session_with_last_model_response() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}
@@ -180,7 +180,7 @@ async fn user_starts_new_session_with_last_model_response() {
 
 #[tokio::test]
 async fn user_starts_without_prompt_files() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}
@@ -207,7 +207,7 @@ async fn user_starts_without_prompt_files() {
 
 #[tokio::test]
 async fn user_starts_with_unavailable_prompt_file() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}
@@ -231,7 +231,7 @@ async fn user_starts_with_unavailable_prompt_file() {
 
 #[tokio::test]
 async fn user_switches_context_during_response() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}

@@ -1,12 +1,12 @@
 use super::support::{
-    RecordedLlama, create_home, read_bottom_line, read_screen, receive_request,
+    RecordedProvider, create_home, read_bottom_line, read_screen, receive_request,
     run_test_application, send_recorded_response,
 };
 use shodan::settings::build_settings;
 
 #[tokio::test]
 async fn user_resumes_session() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}
@@ -55,7 +55,7 @@ async fn user_resumes_session() {
 
 #[tokio::test]
 async fn user_selects_older_session() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider":"llama", "providers":{"llama":{"address":address, "default_model":"model", "models":[{"name":"model"}]}}}),
     );
@@ -110,7 +110,7 @@ async fn user_selects_older_session() {
 
 #[tokio::test]
 async fn user_resumes_project_session_with_its_context_model_and_tool_results() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider":"llama", "providers":{"llama":{"address":address, "default_model":"model", "models":[{"name":"model"}, {"name":"another"}]}}}),
     );
@@ -208,7 +208,7 @@ async fn user_resumes_project_session_with_its_context_model_and_tool_results() 
 
 #[tokio::test]
 async fn user_selects_unavailable_session() {
-    let (address, _requests) = RecordedLlama::new().start().await;
+    let (address, _requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider":"llama", "providers":{"llama":{"address":address, "default_model":"model", "models":[{"name":"model"}]}}}),
     );

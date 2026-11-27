@@ -3,7 +3,7 @@ use std::fs;
 use shodan::settings::build_settings;
 
 use super::support::{
-    CapturedRequest, RecordedLlama, create_home, read_bottom_line, read_screen, receive_request,
+    CapturedRequest, RecordedProvider, create_home, read_bottom_line, read_screen, receive_request,
     run_test_application, send_response_bytes,
 };
 
@@ -16,7 +16,7 @@ async fn send_recorded_chat_response(request: &CapturedRequest, fixture_name: &s
 
 #[tokio::test]
 async fn user_chats_with_inkling_at_its_configured_thinking_level() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -50,7 +50,7 @@ async fn user_chats_with_inkling_at_its_configured_thinking_level() {
 
 #[tokio::test]
 async fn user_cycles_through_configured_models() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {

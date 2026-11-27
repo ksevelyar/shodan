@@ -4,7 +4,7 @@ use super::{
     super::{
         openai::create_openai_home,
         support::{
-            RecordedLlama, create_home, read_bottom_line, read_history, read_screen,
+            RecordedProvider, create_home, read_bottom_line, read_history, read_screen,
             receive_request, receive_request_or_error, run_test_application,
             run_test_application_with_size, send_response_bytes,
         },
@@ -14,7 +14,7 @@ use super::{
 
 #[tokio::test]
 async fn user_reads_file() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider":"llama", "providers": {"llama": {
             "address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [
@@ -118,7 +118,7 @@ async fn user_reads_file() {
 
 #[tokio::test]
 async fn user_reads_multiple_files() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
@@ -165,7 +165,7 @@ async fn user_reads_multiple_files() {
 
 #[tokio::test]
 async fn user_reads_part_of_file() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider":"llama", "providers": {"llama": {
             "address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [
@@ -251,7 +251,7 @@ async fn user_reads_part_of_file() {
 
 #[tokio::test]
 async fn user_scrolls_through_file_read_and_aborts_response() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
@@ -328,7 +328,7 @@ async fn user_scrolls_through_file_read_and_aborts_response() {
 
 #[tokio::test]
 async fn user_reads_source_file() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
@@ -382,7 +382,7 @@ async fn user_reads_source_file() {
 
 #[tokio::test]
 async fn user_reads_nonexistent_file() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider":"llama", "providers": {"llama": {
             "address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [

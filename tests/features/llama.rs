@@ -1,13 +1,13 @@
 use shodan::settings::build_settings;
 
 use super::support::{
-    RecordedLlama, create_home, read_history, receive_request, run_test_application,
+    RecordedProvider, create_home, read_history, receive_request, run_test_application,
     send_response_bytes,
 };
 
 #[tokio::test]
 async fn user_connects_to_configured_server() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {

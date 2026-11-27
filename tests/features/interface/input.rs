@@ -2,13 +2,13 @@ use crossterm::event::KeyCode;
 use shodan::settings::build_settings;
 
 use super::super::support::{
-    RecordedLlama, create_home, read_screen, receive_request, run_test_application,
+    RecordedProvider, create_home, read_screen, receive_request, run_test_application,
     run_test_application_with_size, send_recorded_response,
 };
 
 #[tokio::test]
 async fn user_edits_message_with_horizontal_arrow_keys() {
-    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let (server_address, _requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}
@@ -36,7 +36,7 @@ async fn user_edits_message_with_horizontal_arrow_keys() {
 
 #[tokio::test]
 async fn user_sends_multiline_message() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}
@@ -140,7 +140,7 @@ async fn verify_multiline_message_in_managed_terminal(
 
 #[tokio::test]
 async fn user_edits_multiline_message_with_vertical_arrow_keys() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}}),
     );
@@ -173,7 +173,7 @@ async fn user_edits_multiline_message_with_vertical_arrow_keys() {
 
 #[tokio::test]
 async fn user_edits_wrapped_message_with_vertical_arrow_keys() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}}),
     );
@@ -192,7 +192,7 @@ async fn user_edits_wrapped_message_with_vertical_arrow_keys() {
 
 #[tokio::test]
 async fn user_navigates_message_history_and_restores_draft() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}}),
     );
@@ -234,7 +234,7 @@ fn get_input_line(screen: &ratatui::buffer::Buffer) -> String {
 
 #[tokio::test]
 async fn user_pastes_multiline_text_at_cursor() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}}),
     );
@@ -264,7 +264,7 @@ async fn user_pastes_multiline_text_at_cursor() {
 
 #[tokio::test]
 async fn user_grows_and_shrinks_message_input() {
-    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let (server_address, _requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}}),
     );
@@ -288,7 +288,7 @@ async fn user_grows_and_shrinks_message_input() {
 
 #[tokio::test]
 async fn user_edits_input_beyond_height_limit() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider": "llama", "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}}),
     );

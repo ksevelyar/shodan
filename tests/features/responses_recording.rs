@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use super::support::{RecordedLlama, create_home, receive_request, send_response_bytes};
+use super::support::{RecordedProvider, create_home, receive_request, send_response_bytes};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 fn list_recordings(directory: &Path) -> Vec<std::path::PathBuf> {
@@ -48,7 +48,7 @@ async fn wait_for_terminal_output(
 
 #[tokio::test]
 async fn user_records_openai_response() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_home(
         serde_json::json!({"default_provider": "openai", "providers": {"openai": {
             "address": address, "default_model": "gpt-6.1-terra", "models": [{"name": "gpt-6.1-terra"}]
@@ -85,7 +85,7 @@ async fn user_records_openai_response() {
 
 #[tokio::test]
 async fn user_records_openai_credential_refresh() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_home(
         serde_json::json!({"default_provider": "openai", "providers": {"openai": {
             "address": address, "authentication_address": address,
@@ -135,7 +135,7 @@ async fn user_records_provider_responses() {
         std::env::temp_dir().join(format!("shodan-recording-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&directory).expect("the working directory can be created");
     let completions_directory = directory.join("recordings/llama/v1-chat-completions");
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let configuration_directory = directory.join(".shodan");
     std::fs::create_dir_all(&configuration_directory)
         .expect("the configuration directory can be created");

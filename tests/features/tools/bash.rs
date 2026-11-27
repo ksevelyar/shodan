@@ -2,12 +2,12 @@ use crossterm::event::KeyCode;
 use shodan::settings::build_settings;
 
 use super::super::support::{
-    RecordedLlama, create_home, read_bottom_line, read_history, read_screen,
+    RecordedProvider, create_home, read_bottom_line, read_history, read_screen,
     receive_request_or_error, run_test_application, send_response_bytes,
 };
 
-fn inkling_server() -> RecordedLlama {
-    RecordedLlama::new()
+fn inkling_server() -> RecordedProvider {
+    RecordedProvider::new()
 }
 
 fn tool_scenario_stream(scenario: &str, response_number: usize) -> String {

@@ -5,11 +5,11 @@ use std::{
 };
 
 use super::support::{
-    ASTEROIDS_PLAN_PROMPT, RecordedLlama, assert_received_messages, create_home, read_bottom_line,
-    read_history, read_screen, receive_request, receive_request_or_error, run_test_application,
-    run_test_application_with_configured_clipboard, send_initial_recorded_response,
-    send_recorded_response, send_remaining_recorded_response, send_response_bytes,
-    wait_for_response_disconnect,
+    ASTEROIDS_PLAN_PROMPT, RecordedProvider, assert_received_messages, create_home,
+    read_bottom_line, read_history, read_screen, receive_request, receive_request_or_error,
+    run_test_application, run_test_application_with_configured_clipboard,
+    send_initial_recorded_response, send_recorded_response, send_remaining_recorded_response,
+    send_response_bytes, wait_for_response_disconnect,
 };
 use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -18,7 +18,7 @@ use shodan::settings::build_settings;
 
 #[tokio::test]
 async fn user_copies_selected_text_with_configured_clipboard_command() {
-    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let (server_address, _requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -74,7 +74,7 @@ async fn user_copies_selected_text_with_configured_clipboard_command() {
 
 #[tokio::test]
 async fn user_copies_highlighted_text() {
-    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let (server_address, _requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}},
@@ -120,7 +120,7 @@ async fn user_copies_highlighted_text() {
 
 #[tokio::test]
 async fn user_reads_markdown_in_message() {
-    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let (server_address, _requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}
@@ -150,7 +150,7 @@ async fn user_reads_markdown_in_message() {
 
 #[tokio::test]
 async fn user_reads_markdown_in_model_response() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}
@@ -178,7 +178,7 @@ async fn user_reads_markdown_in_model_response() {
 
 #[tokio::test]
 async fn user_reads_code_block() {
-    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let (server_address, _requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}
@@ -205,7 +205,7 @@ async fn user_reads_code_block() {
 
 #[tokio::test]
 async fn user_reads_long_hyphenated_text() {
-    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let (server_address, _requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -243,7 +243,7 @@ async fn user_reads_long_hyphenated_text() {
 
 #[tokio::test]
 async fn user_aborts_model_response() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -322,7 +322,7 @@ async fn user_aborts_model_response() {
 
 #[tokio::test]
 async fn user_sees_failed_request() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -374,7 +374,7 @@ async fn user_sees_failed_request() {
 
 #[tokio::test]
 async fn user_aborts_tool_call_response() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -446,7 +446,7 @@ async fn user_aborts_tool_call_response() {
 
 #[tokio::test]
 async fn user_watches_model_thinking() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -519,7 +519,7 @@ async fn user_watches_model_thinking() {
 
 #[tokio::test]
 async fn user_selects_visible_text() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -579,7 +579,7 @@ async fn user_selects_visible_text() {
 
 #[tokio::test]
 async fn user_scrolls_with_conversation_selection() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -632,7 +632,7 @@ async fn user_scrolls_with_conversation_selection() {
 
 #[tokio::test]
 async fn user_extends_selection_beyond_visible_conversation() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -676,7 +676,7 @@ async fn user_extends_selection_beyond_visible_conversation() {
 
 #[tokio::test]
 async fn user_scrolls_conversation_history_with_mouse_wheel() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -734,7 +734,7 @@ async fn user_scrolls_conversation_history_with_mouse_wheel() {
 
 #[tokio::test]
 async fn user_composes_message() {
-    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let (server_address, _requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -859,7 +859,7 @@ fn user_exits_with_ctrl_c() {
 
 #[tokio::test]
 async fn user_starts_session_and_scrolls_through_long_response() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {

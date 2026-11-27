@@ -5,7 +5,7 @@ use shodan::settings::build_settings;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::support::{
-    LOGIN_PORT, RecordedLlama, read_bottom_line, read_history, receive_request,
+    LOGIN_PORT, RecordedProvider, read_bottom_line, read_history, receive_request,
     run_test_application, send_response_bytes,
 };
 
@@ -36,7 +36,7 @@ async fn user_connects_to_local_server_while_openai_uses_proxy() {
     let configuration_directory = home_directory.join(".shodan");
     std::fs::create_dir_all(&configuration_directory)
         .expect("the configuration directory can be created");
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let configuration = json!({
         "proxy": {
             "url": "socks5h://127.0.0.1:1",
@@ -132,7 +132,7 @@ async fn user_connects_to_llama_through_proxy() {
     let configuration_directory = home_directory.join(".shodan");
     std::fs::create_dir_all(&configuration_directory)
         .expect("the configuration directory can be created");
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let server_address: std::net::SocketAddr = address
         .trim_start_matches("http://")
         .parse()
@@ -334,7 +334,7 @@ async fn user_connects_with_existing_configuration() {
     let configuration_directory = home_directory.join(".shodan");
     std::fs::create_dir_all(&configuration_directory)
         .expect("the configuration directory can be created");
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let configuration = json!({
         "default_provider": "llama",
         "providers": {

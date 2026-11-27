@@ -1,6 +1,6 @@
 use super::{
     super::support::{
-        RecordedLlama, create_home, read_bottom_line, read_screen, receive_request_or_error,
+        RecordedProvider, create_home, read_bottom_line, read_screen, receive_request_or_error,
         run_test_application,
     },
     support::{read_tool_history, send_scenario_response},
@@ -9,7 +9,7 @@ use shodan::settings::build_settings;
 
 #[tokio::test]
 async fn user_lists_directory() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider":"llama", "providers": {"llama": {
             "address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [
@@ -90,7 +90,7 @@ async fn user_lists_directory() {
 
 #[tokio::test]
 async fn user_lists_nonexistent_directory() {
-    let (address, mut requests) = RecordedLlama::new().start().await;
+    let (address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(
         serde_json::json!({"default_provider":"llama", "providers": {"llama": {
             "address": address, "default_model": "Inkling-2-Mini-UD-IQ3_XXS", "models": [

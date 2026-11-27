@@ -1,7 +1,7 @@
 use shodan::settings::build_settings;
 
 use super::support::{
-    LOGIN_PORT, RecordedLlama, TestHome, create_home, read_bottom_line, read_history,
+    LOGIN_PORT, RecordedProvider, TestHome, create_home, read_bottom_line, read_history,
     receive_request, run_test_application, run_test_application_with_configured_clipboard,
     send_response_bytes,
 };
@@ -87,7 +87,7 @@ pub(crate) fn create_openai_home(address: &str) -> TestHome {
 
 #[tokio::test]
 async fn user_chats_with_default_openai_model() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
@@ -127,7 +127,7 @@ async fn user_chats_with_default_openai_model() {
 
 #[tokio::test]
 async fn user_cycles_to_luna() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
@@ -148,7 +148,7 @@ async fn user_cycles_to_luna() {
 
 #[tokio::test]
 async fn user_watches_openai_thinking() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
@@ -192,7 +192,7 @@ async fn user_watches_openai_thinking() {
 
 #[tokio::test]
 async fn user_continues_after_openai_thinking() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
@@ -223,7 +223,7 @@ async fn user_continues_after_openai_thinking() {
 
 #[tokio::test]
 async fn user_uses_tool_with_openai() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
@@ -254,7 +254,7 @@ async fn user_uses_tool_with_openai() {
 
 #[tokio::test]
 async fn user_views_openai_usage() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
@@ -269,7 +269,7 @@ async fn user_views_openai_usage() {
 
 #[tokio::test]
 async fn user_continues_with_refreshed_credentials() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let path = home.path().join(".shodan/openai.json");
     let mut credential: serde_json::Value =
@@ -310,7 +310,7 @@ async fn user_continues_with_refreshed_credentials() {
 
 #[tokio::test]
 async fn user_aborts_openai_response() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
@@ -339,7 +339,7 @@ async fn user_aborts_openai_response() {
 
 #[tokio::test]
 async fn user_sees_openai_request_error() {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
@@ -365,7 +365,7 @@ async fn user_sees_openai_request_error() {
 
 #[tokio::test]
 async fn user_sees_authentication_error() {
-    let (address, _) = RecordedLlama::new().start_openai().await;
+    let (address, _) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let path = home.path().join(".shodan/openai.json");
     let mut credential: serde_json::Value =
@@ -388,7 +388,7 @@ async fn user_sees_authentication_error() {
 #[tokio::test]
 async fn user_sees_invalid_openai_identity() {
     let _login_port = LOGIN_PORT.lock().await;
-    let (address, _) = RecordedLlama::new().start_openai().await;
+    let (address, _) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     std::fs::remove_file(home.path().join(".shodan/openai.json"))
         .expect("the credentials can be removed");

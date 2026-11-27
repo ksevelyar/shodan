@@ -1,6 +1,6 @@
 use super::support::{
-    ASTEROIDS_PLAN_PROMPT, RecordedLlama, assert_received_messages, create_home, read_bottom_line,
-    read_history, receive_request, run_test_application, send_recorded_response,
+    ASTEROIDS_PLAN_PROMPT, RecordedProvider, assert_received_messages, create_home,
+    read_bottom_line, read_history, receive_request, run_test_application, send_recorded_response,
     send_response_bytes,
 };
 use std::time::Duration;
@@ -10,7 +10,7 @@ use shodan::settings::build_settings;
 
 #[tokio::test]
 async fn user_views_rounded_cache_hits() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -82,7 +82,7 @@ async fn user_views_thinking_level() {
 
 #[tokio::test]
 async fn user_views_session_statistics() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -132,7 +132,7 @@ async fn user_views_session_statistics() {
 
 #[tokio::test]
 async fn user_scrolls_conversation() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {
@@ -174,7 +174,7 @@ async fn user_scrolls_conversation() {
 
 #[tokio::test]
 async fn user_views_response_time() {
-    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({
         "default_provider": "llama",
         "providers": {

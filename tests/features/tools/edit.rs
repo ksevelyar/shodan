@@ -6,7 +6,7 @@ use shodan::settings::build_settings;
 use super::super::{
     openai::create_openai_home,
     support::{
-        RecordedLlama, read_history, receive_request, run_test_application, send_response_bytes,
+        RecordedProvider, read_history, receive_request, run_test_application, send_response_bytes,
     },
 };
 
@@ -16,7 +16,7 @@ async fn run_edit_scenario(
     expected_screen: &str,
     expected_response: &str,
 ) -> (String, Buffer) {
-    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
     let home = create_openai_home(&address);
     let settings =
         build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
