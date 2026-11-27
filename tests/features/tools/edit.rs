@@ -29,7 +29,7 @@ async fn run_edit_scenario(
             .as_array()
             .expect("tools are present")
             .len(),
-        4
+        7
     );
     let recording_directory = Path::new("tests/features/fixtures/openai/tools").join(scenario);
     let response = fs::read_to_string(recording_directory.join("response-1.txt"))

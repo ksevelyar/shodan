@@ -136,7 +136,7 @@ fn start_next_tool(application: &mut Application) {
     };
     let turn = application.session.turn;
     let event_sender = application.event_sender.clone();
-    let allowed = application.session.get_context_name() != "read" || call.name != "edit";
+    let allowed = tools::is_available(&call.name, application.session.get_context_name() == "read");
     application.active_request = Some(tokio::spawn(async move {
         let (content, display) = if allowed {
             tools::execute(&call.name, &call.arguments).await

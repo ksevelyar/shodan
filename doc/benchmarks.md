@@ -7,7 +7,7 @@
 * User exits and resumes the session.
 * User sees the restored conversation.
 
-`session_restore/cold_process` measures settings construction through the first 120 by 24 test-terminal frame in a fresh process. The session uses recorded responses and files from the current checkout. Fixture preparation, runtime creation and process creation are outside the measurement.
+`session_restore/cold_process` measures settings construction through the first 120 by 24 test-terminal frame in a fresh process. The saved session fixture contains recorded responses and file reads. Fixture preparation, runtime creation and process creation are outside the measurement.
 
 ```sh
 cargo bench --bench conversation -- session_restore/cold_process

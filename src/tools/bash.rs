@@ -7,6 +7,10 @@ use tokio::{
 
 const OUTPUT_LIMIT: usize = 50 * 1024;
 
+pub(super) fn describe() -> serde_json::Value {
+    serde_json::json!({"type":"function","function":{"name":"bash","description":"Run a bash command","parameters":{"type":"object","properties":{"command":{"type":"string","description":"Command to run"}},"required":["command"]}}})
+}
+
 pub(super) async fn run_command(command: &str) -> io::Result<(String, bool)> {
     let mut child = Command::new("bash")
         .arg("-c")

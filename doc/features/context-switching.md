@@ -5,7 +5,7 @@
 * A session starts in the read context.
 * User cycles through read, edit, review, and blank with Tab.
 * The top panel shows the current context.
-* Read provides all tools except edit. Edit, review, and blank provide all tools.
+* Read provides all tools except edit and write. Edit, review, and blank provide all tools.
 * Read, edit, and review use their respective prompts from `~/.shodan/read.md`, `~/.shodan/edit.md`, and `~/.shodan/review.md`.
 * Shodan appends the project directory's `AGENTS.md` to each nonblank context prompt, separated by a newline.
 * On startup, Shodan creates missing read, edit, and review prompt files as empty files and preserves existing prompt files.
@@ -26,7 +26,7 @@
 * User starts Shodan and sees read in the top panel.
 * User sees the read prompt followed by the project instructions in the conversation.
 * User sees the existing read, edit, and review prompts unchanged.
-* User sends a message and the model receives the displayed prompt and all tools except edit.
+* User sends a message and the model receives the displayed prompt and all tools except edit and write.
 
 ### 2. User switches contexts and keeps the conversation
 

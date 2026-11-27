@@ -9,6 +9,10 @@ use serde::Deserialize;
 
 use super::EditDisplay;
 
+pub(super) fn describe() -> serde_json::Value {
+    serde_json::json!({"type":"function","function":{"name":"edit","description":"Edit one existing file with exact, unique, non-overlapping replacements matched against the original file. Include all changes to the file in one call.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path"},"edits":{"type":"array","minItems":1,"items":{"type":"object","properties":{"oldText":{"type":"string","description":"Nonempty text to replace, unique in the original file"},"newText":{"type":"string","description":"Replacement text"}},"required":["oldText","newText"]}}},"required":["path","edits"]}}})
+}
+
 #[derive(Deserialize)]
 pub(super) struct EditArguments {
     pub path: String,

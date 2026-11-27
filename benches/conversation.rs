@@ -25,7 +25,7 @@ enum RecordedConversation {
 
 struct Conversation {
     application: TestApplication,
-    home: TestHome,
+    _home: TestHome,
     scroll_up: bool,
     _pending_request: Option<CapturedRequest>,
 }
@@ -122,7 +122,7 @@ impl Conversation {
         }
         Self {
             application,
-            home,
+            _home: home,
             scroll_up: true,
             _pending_request: pending_request,
         }
@@ -222,22 +222,28 @@ fn measure_session_restore(home: &Path) {
 }
 
 fn prepare_saved_session() -> TestHome {
-    let runtime = tokio::runtime::Runtime::new().expect("the benchmark runtime starts");
-    let conversation =
-        runtime.block_on(Conversation::build(1, RecordedConversation::TechnicalDebt));
-    let directory = conversation.home.path().join(".shodan/sessions").join(
+    let home = create_home(
+        json!({"default_provider": "openai", "providers": {"openai": {"address": "http://127.0.0.1:1", "default_model": "model", "models": [{"name": "model"}]}}}),
+    );
+    let credentials = json!({"type":"oauth", "access":"recorded-access", "refresh":"recorded-refresh", "expires":4_102_444_800_000_u64, "clientId":"recorded-client", "scopes":["chatgpt.tokens.use.direct"]});
+    std::fs::write(
+        home.path().join(".shodan/openai.json"),
+        credentials.to_string(),
+    )
+    .expect("the benchmark credentials can be written");
+    let directory = home.path().join(".shodan/sessions").join(
         std::env::current_dir()
             .expect("the project directory exists")
             .strip_prefix("/")
             .expect("the project directory is absolute"),
     );
-    let session = std::fs::read_dir(directory)
-        .expect("the session exists")
-        .next()
-        .expect("the session is present")
-        .expect("the session entry exists")
-        .path();
-    let contents = std::fs::read_to_string(&session).expect("the session can be read");
+    std::fs::create_dir_all(&directory).expect("the session directory can be created");
+    let contents = include_str!("fixtures/technical_debt/session.jsonl");
+    std::fs::write(
+        directory.join("00000000-0000-4000-8000-000000000001.jsonl"),
+        contents,
+    )
+    .expect("the benchmark session can be written");
     let snapshot: serde_json::Value =
         serde_json::from_str(contents.lines().last().expect("the session has a snapshot"))
             .expect("the snapshot is valid");
@@ -255,8 +261,7 @@ fn prepare_saved_session() -> TestHome {
         "restore workload: {} bytes, {read_results} file reads",
         contents.len()
     );
-    drop(conversation.application);
-    conversation.home
+    home
 }
 
 fn benchmark_session_restore(criterion: &mut Criterion) {

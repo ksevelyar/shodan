@@ -888,7 +888,7 @@ fn format_tool_calls(
         if let Some(command) = command {
             lines.extend(format_bash_command(&command, background, width));
         } else {
-            let path = matches!(call.name.as_str(), "edit" | "read" | "ls")
+            let path = matches!(call.name.as_str(), "edit" | "read" | "ls" | "write")
                 .then(|| serde_json::from_str::<serde_json::Value>(&call.arguments).ok())
                 .flatten()
                 .and_then(|arguments| arguments["path"].as_str().map(str::to_owned));
@@ -933,6 +933,28 @@ fn format_conversation_section(
     }
 }
 
+fn format_file_result(message: &Message, width: usize) -> Option<Vec<Line<'static>>> {
+    match message {
+        Message::ToolResult {
+            content,
+            display: Some(ToolDisplay::Read(display)),
+            ..
+        } => Some(format_read_result(content, display, width)),
+        Message::ToolResult {
+            display: Some(ToolDisplay::Write(display)),
+            ..
+        } => {
+            let read_display = ReadDisplay {
+                path: display.path.clone(),
+                offset: 1,
+                preceding_content: String::new(),
+            };
+            Some(format_read_result(&display.content, &read_display, width))
+        }
+        _ => None,
+    }
+}
+
 fn format_messages(
     messages: &[Message],
     conversation: &[Message],
@@ -954,13 +976,8 @@ fn format_messages(
             lines.push(Line::default());
             continue;
         }
-        if let Message::ToolResult {
-            content,
-            display: Some(ToolDisplay::Read(display)),
-            ..
-        } = message
-        {
-            lines.extend(format_read_result(content, display, width));
+        if let Some(result) = format_file_result(message, width) {
+            lines.extend(result);
             lines.push(Line::default());
             continue;
         }

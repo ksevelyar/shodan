@@ -2,6 +2,10 @@ use std::{io, path::Path};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+pub(super) fn describe() -> serde_json::Value {
+    serde_json::json!({"type":"function","function":{"name":"read","description":"Read a text file","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path"},"offset":{"type":"integer","description":"First line, starting at 1"},"limit":{"type":"integer","description":"Maximum number of lines"}},"required":["path"]}}})
+}
+
 pub(super) async fn read_file(
     path: &Path,
     offset: Option<usize>,

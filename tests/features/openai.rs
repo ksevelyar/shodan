@@ -105,7 +105,7 @@ async fn user_chats_with_default_openai_model() {
         .iter()
         .map(|tool| tool["name"].as_str().expect("tool has a name"))
         .collect();
-    assert_eq!(tool_names, ["bash", "ls", "read"]);
+    assert_eq!(tool_names, ["bash", "ls", "read", "grep", "find"]);
     assert_eq!(request.body["store"], false);
     assert_eq!(request.body["stream"], true);
     assert_eq!(request.body["reasoning"]["effort"], "high");

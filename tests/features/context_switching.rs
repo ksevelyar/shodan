@@ -53,7 +53,7 @@ async fn user_starts_session_with_project_instructions() {
         .iter()
         .map(|tool| tool["function"]["name"].as_str().expect("tool has a name"))
         .collect();
-    assert_eq!(names, ["bash", "ls", "read"]);
+    assert_eq!(names, ["bash", "ls", "read", "grep", "find"]);
 }
 
 #[tokio::test]
@@ -96,7 +96,7 @@ async fn user_switches_contexts_and_keeps_conversation() {
             .as_array()
             .expect("tools are present")
             .len(),
-        4
+        7
     );
     application.press_key(KeyCode::Tab);
     application
@@ -113,7 +113,7 @@ async fn user_switches_contexts_and_keeps_conversation() {
             .as_array()
             .expect("tools are present")
             .len(),
-        4
+        7
     );
     application.press_key(KeyCode::Tab);
     application
@@ -127,7 +127,7 @@ async fn user_switches_contexts_and_keeps_conversation() {
             .as_array()
             .expect("tools are present")
             .len(),
-        4
+        7
     );
     application.press_key(KeyCode::Tab);
     application
