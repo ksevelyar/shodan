@@ -5,7 +5,8 @@
 * User can ask Shodan to read a text file.
 * User can ask Shodan to read part of a text file.
 * File reading requests show `read` followed by the file path.
-* File reading results show line numbers from the original file and syntax highlighting for code on a purple background across the conversation width.
+* File reading requests and results share a continuous purple background across the conversation width.
+* File reading results show line numbers from the original file and syntax highlighting for code.
 * Model receives the requested file contents.
 * User is informed when a file cannot be read.
 
@@ -15,24 +16,31 @@
 
 * A file named `greeting.txt` contains the text `Hello, Shodan!`.
 * User asks Shodan to read `greeting.txt`.
-* User sees `read` followed by the file path and its result, `Hello, Shodan!`, on a purple background across the conversation width.
+* User sees `read` followed by the file path and its result, `Hello, Shodan!`, on a continuous purple background across the conversation width.
 * Model responds using the file contents.
 
-### 2. User reads part of a file
+### 2. User reads multiple files
+
+* User asks the model to inspect several files.
+* Model requests the files together.
+* User sees each file reading request followed by its result.
+* Model receives the file contents.
+
+### 3. User reads part of a file
 
 * A file named `lines.txt` contains `First line`, `Second line` and `Third line` on separate lines.
 * User asks Shodan to read the second line of `lines.txt`.
 * User sees the file reading request and its result, `Second line` numbered as line 2, in the conversation.
 * Model responds using the requested line.
 
-### 3. User reads a nonexistent file
+### 4. User reads a nonexistent file
 
 * The file `missing.txt` does not exist in the session directory.
 * User asks Shodan to read `missing.txt`.
 * User sees the file reading request and its error in the conversation.
 * User is informed that the file could not be read.
 
-### 4. User reads a source file
+### 5. User reads a source file
 
 * A file named `fibonacci.rs` contains:
 

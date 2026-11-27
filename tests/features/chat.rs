@@ -491,7 +491,7 @@ async fn user_watches_model_thinking() {
     let screen = application
         .wait_for_screen(|screen| read_history(screen).contains("The user is asking"))
         .await;
-    for text in ["Thinking:", "The user is asking"] {
+    for text in ["The user is asking"] {
         let row = (0..screen.area.height - 4)
             .find(|&row| {
                 let line = (0..screen.area.width)
@@ -500,6 +500,10 @@ async fn user_watches_model_thinking() {
                 line.starts_with(text)
             })
             .expect("the thinking is visible");
+        let preceding_line = (0..screen.area.width)
+            .map(|column| screen[(column, row - 1)].symbol())
+            .collect::<String>();
+        assert_eq!(preceding_line.trim(), "");
         for column in 0..text.len() {
             let column = u16::try_from(column).expect("the thinking fits in the terminal");
             assert_eq!(screen[(column, row)].fg, Color::Rgb(128, 128, 128));

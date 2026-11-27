@@ -6,6 +6,8 @@
 * The user can scroll through tool results and abort while a response is in progress.
 * The status panel remains visible at the bottom while the user scrolls through conversation history.
 * Long conversation text remains readable across lines.
+* The conversation stays at the user's scroll position while new content arrives.
+* Ctrl-End moves to the bottom and follows new content.
 
 ## User scenarios
 
@@ -18,4 +20,7 @@
 
 * User asks the model to read a source file.
 * The model reads the file and continues its response.
-* User scrolls through the source file and aborts the response.
+* User scrolls through the source file while the response continues.
+* The conversation stays at the user's scroll position.
+* User presses Ctrl-End and follows the response at the bottom.
+* User aborts the response.

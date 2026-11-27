@@ -78,7 +78,7 @@ pub(super) fn format_markdown(
                 );
             }
             Event::End(TagEnd::CodeBlock) => code_language = None,
-            Event::Text(_) if code_language.is_some() => {
+            Event::Text(_) if code_language.is_some() && base_style.fg.is_none() => {
                 highlight_code(
                     content,
                     range,
@@ -92,8 +92,10 @@ pub(super) fn format_markdown(
                     .take_while(|byte| *byte == b'`')
                     .count();
                 hide_delimiters(&mut visible, range.clone(), delimiter_length);
-                for style in &mut styles[range] {
-                    *style = style.fg(Color::Cyan);
+                if base_style.fg.is_none() {
+                    for style in &mut styles[range] {
+                        *style = style.fg(Color::Cyan);
+                    }
                 }
             }
             _ => {}

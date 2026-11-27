@@ -160,9 +160,30 @@ async fn user_watches_openai_thinking() {
         .find("event: response.output_text.delta")
         .expect("the response has streamed text");
     send_response_bytes(&request, &response[..end]).await;
-    application
+    let screen = application
         .wait_for_screen(|screen| read_history(screen).contains("Calculating lamb total"))
         .await;
+    let row = (0..screen.area.height)
+        .find(|&row| {
+            (0..screen.area.width)
+                .map(|column| screen[(column, row)].symbol())
+                .collect::<String>()
+                .trim()
+                == "Calculating lamb total"
+        })
+        .expect("the formatted thinking is visible");
+    for column in 0.."Calculating lamb total".len() {
+        let column = u16::try_from(column).expect("the thinking fits in the terminal");
+        assert_eq!(
+            screen[(column, row)].fg,
+            ratatui::style::Color::Rgb(128, 128, 128)
+        );
+        assert!(
+            screen[(column, row)]
+                .modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
+    }
     send_response_bytes(&request, &response[end..]).await;
     application
         .wait_for_screen(|screen| read_bottom_line(screen).contains("↑46 ↓96 CH0%"))

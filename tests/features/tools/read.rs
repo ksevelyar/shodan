@@ -5,7 +5,8 @@ use super::{
         openai::create_openai_home,
         support::{
             RecordedLlama, create_home, read_bottom_line, read_history, read_screen,
-            receive_request, receive_request_or_error, run_test_application, send_response_bytes,
+            receive_request, receive_request_or_error, run_test_application,
+            run_test_application_with_size, send_response_bytes,
         },
     },
     support::{read_tool_history, send_scenario_response},
@@ -99,6 +100,10 @@ async fn user_reads_file() {
                 .contains("1  Hello, Shodan!")
         })
         .expect("the file contents are visible");
+    let preceding_line = (0..screen.area.width)
+        .map(|column| screen[(column, row - 1)].symbol())
+        .collect::<String>();
+    assert_eq!(preceding_line.trim(), format!("read {tool_path}"));
     for column in 0..screen.area.width {
         assert_eq!(
             screen[(column, row)].bg,
@@ -108,6 +113,53 @@ async fn user_reads_file() {
             screen[(column, row - 1)].bg,
             ratatui::style::Color::Rgb(84, 70, 125)
         );
+    }
+}
+
+#[tokio::test]
+async fn user_reads_multiple_files() {
+    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let home = create_openai_home(&address);
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application_with_size(settings, 120, 1400);
+    application.send_message("what do you think is biggest tech debt? write plan with all details");
+    let request = receive_request(&mut requests).await;
+    send_response_bytes(
+        &request,
+        include_str!("../../../benches/fixtures/technical_debt/response-3.txt"),
+    )
+    .await;
+    let _request = receive_request(&mut requests).await;
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen).contains("read src/events.rs"))
+        .await;
+    let mut previous_row = 0;
+    for path in [
+        "doc/architecture.md",
+        "src/application.rs",
+        "src/session.rs",
+        "src/chats.rs",
+        "src/events.rs",
+    ] {
+        let heading = format!("read {path}");
+        let row = (previous_row..screen.area.height - 4)
+            .find(|&row| {
+                (0..screen.area.width)
+                    .map(|column| screen[(column, row)].symbol())
+                    .collect::<String>()
+                    .trim()
+                    == heading
+            })
+            .expect("the file request is visible");
+        let result = (0..screen.area.width)
+            .map(|column| screen[(column, row + 1)].symbol())
+            .collect::<String>();
+        assert!(
+            result.trim_start().starts_with("1  "),
+            "{heading}: {result}"
+        );
+        previous_row = row + 1;
     }
 }
 
@@ -231,11 +283,40 @@ async fn user_scrolls_through_file_read_and_aborts_response() {
     let history = read_history(&screen);
     application.press_key(crossterm::event::KeyCode::PageUp);
     application.press_key(crossterm::event::KeyCode::PageUp);
-    application
+    let screen = application
         .wait_for_screen(|screen| {
             let current_history = read_history(screen);
             current_history != history && current_history.contains("EventSource")
         })
+        .await;
+    let anchored_history = read_history(&screen);
+    let remaining_events = response
+        .split("\n\n")
+        .skip(16)
+        .take(30)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+        + "\n\n";
+    send_response_bytes(&request, &remaining_events).await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen) == anchored_history)
+        .await;
+    assert_eq!(read_history(&screen), anchored_history);
+    application.press_control_end();
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("Biggest technical debt"))
+        .await;
+    let following_events = response
+        .split("\n\n")
+        .skip(46)
+        .take(40)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+        + "\n\n";
+    send_response_bytes(&request, &following_events).await;
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("synchronized"))
         .await;
     application.press_key(crossterm::event::KeyCode::Esc);
     application.press_key(crossterm::event::KeyCode::PageDown);

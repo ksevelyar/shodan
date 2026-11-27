@@ -6,8 +6,9 @@
 * Conversation history is retained during the session.
 * User can scroll conversation history one line at a time with the mouse wheel anywhere in the terminal.
 * Model responses stream as they are generated.
-* User sees model thinking in grey as it streams.
-* User sees tool calls and their results in the conversation.
+* User sees model thinking in grey with Markdown formatting as it streams, without a label.
+* User sees each tool call followed by its result in the conversation.
+* Tool results appear without a label.
 * User can abort a request with Esc, stopping model processing and seeing `Request was aborted` in neon pink.
 * User sees `Request failed` when a model request fails.
 * Conversation messages appear without role labels.
@@ -66,7 +67,7 @@
 
 * User asks Shodan to read `greeting.txt`.
 * Model streams its thinking about reading the file.
-* User sees the thinking in grey before the model finishes.
+* User sees the thinking in grey without a label before the model finishes.
 * Model reads the file and responds.
 
 ### 8. User exits with Ctrl-C

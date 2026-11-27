@@ -59,7 +59,8 @@ pub(crate) fn send_message(application: &mut Application, content: String) {
     start_response(application, messages);
 }
 
-fn take_partial_response(application: &mut Application) -> String {
+fn take_partial_response(application: &mut Application) -> (String, String) {
+    let mut partial_thinking = String::new();
     let mut partial_response = String::new();
     for message in application
         .session
@@ -71,21 +72,20 @@ fn take_partial_response(application: &mut Application) -> String {
         } = message
         {
             if !thinking.is_empty() {
-                partial_response.push_str("Thinking:\n");
-                partial_response.push_str(&thinking);
-                partial_response.push('\n');
+                partial_thinking.push_str(&thinking);
+                partial_thinking.push('\n');
             }
             partial_response.push_str(&content);
         }
     }
-    partial_response
+    (partial_thinking, partial_response)
 }
 
 fn mark_response_aborted(application: &mut Application) {
-    let partial_response = take_partial_response(application);
+    let (partial_thinking, partial_response) = take_partial_response(application);
     application.session.messages.push(Message::Model {
         content: partial_response,
-        thinking: String::new(),
+        thinking: partial_thinking.trim_end_matches('\n').to_owned(),
         tool_calls: Vec::new(),
         provider_items: Vec::new(),
         aborted: true,
@@ -181,11 +181,13 @@ fn handle_failed_request(
     application.active_request = None;
     application.error = Some(error);
     application.response_started = None;
-    let partial_response = take_partial_response(application);
+    let (partial_thinking, partial_response) = take_partial_response(application);
     application
         .session
         .messages
-        .push(Message::FailedResponse(partial_response));
+        .push(Message::FailedResponse(format!(
+            "{partial_thinking}{partial_response}"
+        )));
     save_session(application);
 }
 

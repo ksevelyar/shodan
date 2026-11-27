@@ -228,7 +228,7 @@ struct FormattedMessages {
 
 struct FormattedMessage {
     message: Message,
-    tool_backgrounds: Vec<Color>,
+    tool_results: Vec<Message>,
     lines: Vec<Line<'static>>,
 }
 
@@ -464,7 +464,6 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
         {
             let input = application.input.take();
             send_message(application, input);
-            application.scroll_from_bottom = 0;
         }
         KeyCode::Char(' ') if key.modifiers == KeyModifiers::CONTROL => {
             application.session.cycle_model();
@@ -473,6 +472,9 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
             {
                 application.error = Some(error);
             }
+        }
+        KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            application.scroll_from_bottom = 0;
         }
         KeyCode::PageUp => scroll_up(application, 8),
         KeyCode::PageDown => scroll_down(application, 8),
@@ -680,7 +682,7 @@ fn format_model_message(
     let mut sections = Vec::new();
     if !thinking.is_empty() {
         sections.push((
-            format!("Thinking:\n{thinking}"),
+            thinking.to_owned(),
             Style::default().fg(Color::from(Palette::ThinkingGrey)),
         ));
     }
@@ -802,7 +804,7 @@ fn format_read_result(content: &str, display: &ReadDisplay, width: usize) -> Vec
         .to_string()
         .len();
     let background = Color::from(Palette::Lavender);
-    let mut output = vec![Line::from("Result:").style(Style::default().bg(background))];
+    let mut output = Vec::new();
     for (position, line) in content.split_inclusive('\n').enumerate() {
         let prefix = format!("{:>number_width$}  ", display.offset + position);
         let mut spans = vec![Span::styled(
@@ -902,6 +904,11 @@ fn format_tool_calls(
                 width,
             ));
         }
+        if let Some(result) = messages.iter().find(
+            |message| matches!(message, Message::ToolResult { call_id, .. } if call_id == &call.id),
+        ) {
+            lines.extend(format_messages(std::slice::from_ref(result), &[], width));
+        }
     }
     lines
 }
@@ -913,8 +920,7 @@ fn format_conversation_section(
     message: &Message,
     width: usize,
 ) -> Vec<Line<'static>> {
-    let markdown_message = user
-        || matches!(message, Message::Model { content: model_content, .. } if content == model_content && !model_content.is_empty());
+    let markdown_message = user || matches!(message, Message::Model { .. });
     if markdown_message {
         let message_style = if user {
             style.bg(Color::from(Palette::DarkGrey))
@@ -934,6 +940,11 @@ fn format_messages(
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for message in messages {
+        if let Message::ToolResult { call_id, .. } = message
+            && conversation.iter().any(|candidate| matches!(candidate, Message::Model { tool_calls, .. } if tool_calls.iter().any(|call| &call.id == call_id)))
+        {
+            continue;
+        }
         if let Message::ToolResult {
             display: Some(ToolDisplay::Edit(display)),
             ..
@@ -980,7 +991,7 @@ fn format_messages(
             }
             Message::ToolResult { content, .. } => (
                 vec![(
-                    format!("Result:\n{content}"),
+                    content.clone(),
                     Style::default().bg(Color::from(Palette::Lavender)),
                 )],
                 false,
@@ -1036,21 +1047,22 @@ impl FormattedMessages {
         }
         self.messages.truncate(messages.len());
         for (position, message) in messages.iter().enumerate() {
-            let tool_backgrounds = match message {
-                Message::Model { tool_calls, .. } => tool_calls
+            let tool_results = match message {
+                Message::Model { tool_calls, .. } => messages
                     .iter()
-                    .map(|call| get_tool_call_background(call, messages))
+                    .filter(|candidate| matches!(candidate, Message::ToolResult { call_id, .. } if tool_calls.iter().any(|call| &call.id == call_id)))
+                    .cloned()
                     .collect(),
                 _ => Vec::new(),
             };
             if self.messages.get(position).is_some_and(|formatted| {
-                formatted.message == *message && formatted.tool_backgrounds == tool_backgrounds
+                formatted.message == *message && formatted.tool_results == tool_results
             }) {
                 continue;
             }
             let formatted = FormattedMessage {
                 message: message.clone(),
-                tool_backgrounds,
+                tool_results,
                 lines: format_messages(std::slice::from_ref(message), messages, width),
             };
             if position == self.messages.len() {
@@ -1101,7 +1113,13 @@ fn draw_interface(
         .sum::<usize>()
         + error_lines.len();
     let height = usize::from(areas[0].height);
+    let previous_maximum_scroll = *maximum_scroll;
     *maximum_scroll = line_count.saturating_sub(height);
+    if *scroll_from_bottom > 0 && *scroll_from_bottom != usize::MAX {
+        *scroll_from_bottom = scroll_from_bottom
+            .saturating_add(maximum_scroll.saturating_sub(previous_maximum_scroll))
+            .saturating_sub(previous_maximum_scroll.saturating_sub(*maximum_scroll));
+    }
     *scroll_from_bottom = (*scroll_from_bottom).min(*maximum_scroll);
     let start = maximum_scroll.saturating_sub(*scroll_from_bottom);
     let visible = formatted_messages
