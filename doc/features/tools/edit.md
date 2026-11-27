@@ -5,7 +5,8 @@
 * User can ask Shodan to edit an existing text file.
 * User can ask Shodan to make multiple changes to a file together.
 * Changes preserve the text outside the edited regions.
-* Successful edits show a syntax-highlighted diff with line numbers in the tool output.
+* Editing requests show `edit` followed by the file path.
+* Successful edits show a syntax-highlighted diff with line numbers and colored backgrounds across the conversation width.
 * User is informed when a file cannot be edited.
 * If any change in a request fails, the file remains unchanged.
 
@@ -26,7 +27,7 @@ fn fibonacci(number: u32) -> u64 {
 ```
 
 * User asks Shodan to replace the recursive Fibonacci implementation with an iterative one.
-* User sees the editing request and a syntax-highlighted diff in the conversation. Removed lines show original line numbers and added lines show updated line numbers:
+* User sees `edit` followed by the file path and a syntax-highlighted diff with colored backgrounds across the conversation width. Removed lines show original line numbers and added lines show updated line numbers:
 
 ```diff
   1   fn fibonacci(number: u32) -> u64 {

@@ -4,14 +4,14 @@ use tokio::time::Instant;
 
 use crate::{application::Application, events::Event, providers, tools};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct ToolCall {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) arguments: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(crate) enum Message {
     System(String),
     User(String),

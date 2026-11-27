@@ -98,6 +98,9 @@ async fn user_edits_file() {
     assert!(output.contains("-    match number {"));
     assert!(output.contains("+    let mut previous = 0;"));
     assert!(read_history(&screen).contains("- 2      match number {"));
+    assert!(
+        read_history(&screen).contains("edit target/edit-scenarios/user_edits_file/fibonacci.rs")
+    );
     let row = (0..screen.area.height)
         .find(|row| {
             (0..screen.area.width)
@@ -112,6 +115,12 @@ async fn user_edits_file() {
     let keyword = u16::try_from(line.find("let mut").expect("the keyword is visible"))
         .expect("the keyword fits on screen");
     assert_ne!(screen[(keyword, row)].fg, screen[(keyword + 8, row)].fg);
+    for column in 0..screen.area.width {
+        assert_eq!(
+            screen[(column, row)].bg,
+            ratatui::style::Color::Rgb(29, 75, 55)
+        );
+    }
 }
 
 #[tokio::test]

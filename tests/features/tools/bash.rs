@@ -104,14 +104,14 @@ async fn user_runs_command() {
                 .starts_with("$ echo hello")
         })
         .expect("the command is visible");
-    assert_eq!(
-        screen[(0, command_row)].bg,
-        ratatui::style::Color::Rgb(84, 70, 125)
-    );
-    assert_eq!(
-        screen[(0, command_row + 1)].bg,
-        ratatui::style::Color::Rgb(84, 70, 125)
-    );
+    for row in [command_row, command_row + 1] {
+        for column in 0..screen.area.width {
+            assert_eq!(
+                screen[(column, row)].bg,
+                ratatui::style::Color::Rgb(84, 70, 125)
+            );
+        }
+    }
     let output = (0..screen.area.width)
         .map(|column| screen[(column, command_row + 1)].symbol())
         .collect::<String>();
@@ -209,10 +209,12 @@ async fn user_is_informed_when_command_fails() {
                 .starts_with("$ exit 3")
         })
         .expect("the command is visible");
-    assert_eq!(
-        screen[(0, command_row)].bg,
-        ratatui::style::Color::Rgb(125, 48, 48)
-    );
+    for column in 0..screen.area.width {
+        assert_eq!(
+            screen[(column, command_row)].bg,
+            ratatui::style::Color::Rgb(125, 48, 48)
+        );
+    }
     let failure_row = (command_row + 1..screen.area.height)
         .find(|row| {
             (0..screen.area.width)

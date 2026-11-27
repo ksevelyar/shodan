@@ -156,6 +156,19 @@ pub struct Interface<BackendType: Backend, EventSource> {
     terminal: Terminal<BackendType>,
     events: EventSource,
     terminal_session: Option<TerminalSession>,
+    formatted_messages: FormattedMessages,
+}
+
+#[derive(Default)]
+struct FormattedMessages {
+    width: usize,
+    messages: Vec<FormattedMessage>,
+}
+
+struct FormattedMessage {
+    message: Message,
+    tool_backgrounds: Vec<Color>,
+    lines: Vec<Line<'static>>,
 }
 
 #[doc = "# Errors\nReturns an error if the terminal cannot be initialized."]
@@ -180,6 +193,7 @@ where
         terminal,
         events,
         terminal_session,
+        formatted_messages: FormattedMessages::default(),
     })
 }
 
@@ -229,7 +243,7 @@ where
                 application.selection = None;
                 application.screen_area = frame.area();
             }
-            draw_interface(frame, application);
+            draw_interface(frame, application, &mut interface.formatted_messages);
             draw_selection(
                 frame,
                 &mut application.selection,
@@ -731,6 +745,24 @@ fn format_read_result(content: &str, display: &ReadDisplay, width: usize) -> Vec
     output
 }
 
+fn get_tool_call_background(call: &ToolCall, messages: &[Message]) -> Color {
+    messages
+        .iter()
+        .find_map(|message| match message {
+            Message::ToolResult {
+                call_id,
+                display: Some(ToolDisplay::Bash { successful }),
+                ..
+            } if call_id == &call.id => Some(Color::from(if *successful {
+                Palette::Lavender
+            } else {
+                Palette::Red
+            })),
+            _ => None,
+        })
+        .unwrap_or_else(|| Color::from(Palette::Lavender))
+}
+
 fn format_tool_calls(
     tool_calls: &[ToolCall],
     messages: &[Message],
@@ -738,21 +770,7 @@ fn format_tool_calls(
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for call in tool_calls {
-        let background = messages
-            .iter()
-            .find_map(|message| match message {
-                Message::ToolResult {
-                    call_id,
-                    display: Some(ToolDisplay::Bash { successful }),
-                    ..
-                } if call_id == &call.id => Some(Color::from(if *successful {
-                    Palette::Lavender
-                } else {
-                    Palette::Red
-                })),
-                _ => None,
-            })
-            .unwrap_or_else(|| Color::from(Palette::Lavender));
+        let background = get_tool_call_background(call, messages);
         let command = if call.name == "bash" {
             serde_json::from_str::<serde_json::Value>(&call.arguments)
                 .ok()
@@ -763,7 +781,15 @@ fn format_tool_calls(
         if let Some(command) = command {
             lines.extend(format_bash_command(&command, background, width));
         } else {
-            let content = format!("{} {}", call.name, call.arguments);
+            let path = matches!(call.name.as_str(), "edit" | "read" | "ls")
+                .then(|| serde_json::from_str::<serde_json::Value>(&call.arguments).ok())
+                .flatten()
+                .and_then(|arguments| arguments["path"].as_str().map(str::to_owned));
+            let content = format!(
+                "{} {}",
+                call.name,
+                path.as_deref().unwrap_or(&call.arguments)
+            );
             lines.extend(wrap_message_section(
                 &content,
                 Style::default().bg(background),
@@ -775,7 +801,11 @@ fn format_tool_calls(
     lines
 }
 
-fn format_messages(messages: &[Message], width: usize) -> Vec<Line<'static>> {
+fn format_messages(
+    messages: &[Message],
+    conversation: &[Message],
+    width: usize,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for message in messages {
         if let Message::ToolResult {
@@ -846,7 +876,7 @@ fn format_messages(messages: &[Message], width: usize) -> Vec<Line<'static>> {
             lines.extend(wrap_message_section(&content, style, user, width));
         }
         if let Message::Model { tool_calls, .. } = message {
-            lines.extend(format_tool_calls(tool_calls, messages, width));
+            lines.extend(format_tool_calls(tool_calls, conversation, width));
         }
         if aborted {
             for line in textwrap::wrap("Request was aborted", width) {
@@ -861,10 +891,54 @@ fn format_messages(messages: &[Message], width: usize) -> Vec<Line<'static>> {
             lines.push(Line::default());
         }
     }
+    for line in &mut lines {
+        if line.style.bg.is_some() {
+            let padding = width.saturating_sub(line.width());
+            line.spans.push(Span::raw(" ".repeat(padding)));
+        }
+    }
     lines
 }
 
-fn draw_interface(frame: &mut Frame<'_>, application: &mut Application) {
+impl FormattedMessages {
+    fn update(&mut self, messages: &[Message], width: usize) {
+        if self.width != width {
+            self.messages.clear();
+            self.width = width;
+        }
+        self.messages.truncate(messages.len());
+        for (position, message) in messages.iter().enumerate() {
+            let tool_backgrounds = match message {
+                Message::Model { tool_calls, .. } => tool_calls
+                    .iter()
+                    .map(|call| get_tool_call_background(call, messages))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            if self.messages.get(position).is_some_and(|formatted| {
+                formatted.message == *message && formatted.tool_backgrounds == tool_backgrounds
+            }) {
+                continue;
+            }
+            let formatted = FormattedMessage {
+                message: message.clone(),
+                tool_backgrounds,
+                lines: format_messages(std::slice::from_ref(message), messages, width),
+            };
+            if position == self.messages.len() {
+                self.messages.push(formatted);
+            } else {
+                self.messages[position] = formatted;
+            }
+        }
+    }
+}
+
+fn draw_interface(
+    frame: &mut Frame<'_>,
+    application: &mut Application,
+    formatted_messages: &mut FormattedMessages,
+) {
     let input = application.input.as_str();
     let statistics = &application.statistics;
     let scroll_from_bottom = &mut application.scroll_from_bottom;
@@ -883,22 +957,31 @@ fn draw_interface(frame: &mut Frame<'_>, application: &mut Application) {
     ])
     .split(panels[1]);
     let width = usize::from(areas[0].width).max(1);
-    let mut lines = format_messages(&application.session.messages, width);
-    if let Some(error) = &application.error {
-        lines.extend(
-            textwrap::wrap(&format!("Request failed: {error}"), width)
-                .into_iter()
-                .map(|line| Line::from(line.into_owned())),
-        );
-    }
+    formatted_messages.update(&application.session.messages, width);
+    let error_lines = application.error.as_ref().map_or_else(Vec::new, |error| {
+        textwrap::wrap(&format!("Request failed: {error}"), width)
+            .into_iter()
+            .map(|line| Line::from(line.into_owned()))
+            .collect::<Vec<_>>()
+    });
+    let line_count = formatted_messages
+        .messages
+        .iter()
+        .map(|message| message.lines.len())
+        .sum::<usize>()
+        + error_lines.len();
     let height = usize::from(areas[0].height);
-    *maximum_scroll = lines.len().saturating_sub(height);
+    *maximum_scroll = line_count.saturating_sub(height);
     *scroll_from_bottom = (*scroll_from_bottom).min(*maximum_scroll);
     let start = maximum_scroll.saturating_sub(*scroll_from_bottom);
-    let visible = lines
-        .into_iter()
+    let visible = formatted_messages
+        .messages
+        .iter()
+        .flat_map(|message| message.lines.iter())
+        .chain(error_lines.iter())
         .skip(start)
         .take(height)
+        .cloned()
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(visible), areas[0]);
     for area in [areas[1], areas[3]] {

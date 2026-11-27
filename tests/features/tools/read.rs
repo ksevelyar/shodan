@@ -74,7 +74,7 @@ async fn user_reads_file() {
             let history = read_tool_history(screen);
             history
                 .lines()
-                .any(|line| line.trim_start().starts_with("read") && line.contains(tool_path))
+                .any(|line| line.trim() == format!("read {tool_path}"))
                 && expected_tool_results
                     .iter()
                     .all(|expected| history.contains(expected))
@@ -91,6 +91,24 @@ async fn user_reads_file() {
         })
         .await;
     assert!(read_history(&screen).contains("1  Hello, Shodan!"));
+    let row = (0..screen.area.height)
+        .find(|row| {
+            (0..screen.area.width)
+                .map(|column| screen[(column, *row)].symbol())
+                .collect::<String>()
+                .contains("1  Hello, Shodan!")
+        })
+        .expect("the file contents are visible");
+    for column in 0..screen.area.width {
+        assert_eq!(
+            screen[(column, row)].bg,
+            ratatui::style::Color::Rgb(84, 70, 125)
+        );
+        assert_eq!(
+            screen[(column, row - 1)].bg,
+            ratatui::style::Color::Rgb(84, 70, 125)
+        );
+    }
 }
 
 #[tokio::test]
@@ -177,6 +195,54 @@ async fn user_reads_part_of_file() {
         })
         .await;
     assert!(read_history(&screen).contains("2  Second line"));
+}
+
+#[tokio::test]
+async fn user_scrolls_through_file_read_and_aborts_response() {
+    let (address, mut requests) = RecordedLlama::new().start_openai().await;
+    let home = create_openai_home(&address);
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
+    application.send_message("what do you think is biggest tech debt? write plan with all details");
+    let request = receive_request(&mut requests).await;
+    send_response_bytes(
+        &request,
+        include_str!("../../../benches/fixtures/technical_debt/response-3.txt"),
+    )
+    .await;
+    let request = receive_request(&mut requests).await;
+    let response = include_str!("../../../benches/fixtures/technical_debt/response-6.txt");
+    let streamed_events = response
+        .split("\n\n")
+        .take(16)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+        + "\n\n";
+    send_response_bytes(&request, &streamed_events).await;
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("Biggest technical debt"))
+        .await;
+    let screen = application
+        .wait_for_screen(|screen| {
+            read_history(screen).contains("chats::apply_event(application, event)")
+        })
+        .await;
+    let history = read_history(&screen);
+    application.press_key(crossterm::event::KeyCode::PageUp);
+    application.press_key(crossterm::event::KeyCode::PageUp);
+    application
+        .wait_for_screen(|screen| {
+            let current_history = read_history(screen);
+            current_history != history && current_history.contains("EventSource")
+        })
+        .await;
+    application.press_key(crossterm::event::KeyCode::Esc);
+    application.press_key(crossterm::event::KeyCode::PageDown);
+    application.press_key(crossterm::event::KeyCode::PageDown);
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("Request was aborted"))
+        .await;
 }
 
 #[tokio::test]

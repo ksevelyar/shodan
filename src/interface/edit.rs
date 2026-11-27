@@ -86,7 +86,7 @@ pub(super) fn format_edit_result(display: &EditDisplay, width: usize) -> Vec<Lin
     let updated = highlight_source(&display.updated, &display.path);
     let number_width = original.len().max(updated.len()).to_string().len();
     let diff = TextDiff::from_lines(&display.original, &display.updated);
-    let mut lines = vec![Line::from(format!("Successfully edited {}", display.path))];
+    let mut lines = Vec::new();
     let context_lines = 3;
     for (group_number, group) in diff.grouped_ops(context_lines).iter().enumerate() {
         if group_number > 0 {

@@ -49,21 +49,21 @@ struct DirectoryArguments {
     path: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum ToolDisplay {
     Read(ReadDisplay),
     Edit(EditDisplay),
     Bash { successful: bool },
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct EditDisplay {
     pub path: String,
     pub original: String,
     pub updated: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct ReadDisplay {
     pub path: String,
     pub offset: usize,
