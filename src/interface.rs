@@ -1,5 +1,6 @@
 mod edit;
 mod input;
+mod markdown;
 
 pub(crate) use input::Input;
 
@@ -905,6 +906,27 @@ fn format_tool_calls(
     lines
 }
 
+fn format_conversation_section(
+    content: &str,
+    style: Style,
+    user: bool,
+    message: &Message,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let markdown_message = user
+        || matches!(message, Message::Model { content: model_content, .. } if content == model_content && !model_content.is_empty());
+    if markdown_message {
+        let message_style = if user {
+            style.bg(Color::from(Palette::DarkGrey))
+        } else {
+            style
+        };
+        markdown::format_markdown(content, message_style, width)
+    } else {
+        wrap_message_section(content, style, user, width)
+    }
+}
+
 fn format_messages(
     messages: &[Message],
     conversation: &[Message],
@@ -977,7 +999,9 @@ fn format_messages(
             ),
         };
         for (content, style) in sections {
-            lines.extend(wrap_message_section(&content, style, user, width));
+            lines.extend(format_conversation_section(
+                &content, style, user, message, width,
+            ));
         }
         if let Message::Model { tool_calls, .. } = message {
             lines.extend(format_tool_calls(tool_calls, conversation, width));

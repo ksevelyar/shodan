@@ -73,6 +73,137 @@ async fn user_copies_selected_text_with_configured_clipboard_command() {
 }
 
 #[tokio::test]
+async fn user_copies_highlighted_text() {
+    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}},
+        "clipboard_command": ["sh", "-c", "cat > \"$1\"", "clipboard", "temporary"]
+    }));
+    let clipboard_path = home.path().join("clipboard");
+    let settings_path = home.path().join(".shodan/settings.json");
+    let mut configuration: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&settings_path).expect("the settings can be read"))
+            .expect("the settings are valid");
+    configuration["clipboard_command"][4] = serde_json::json!(clipboard_path);
+    std::fs::write(settings_path, configuration.to_string()).expect("the settings can be written");
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application_with_configured_clipboard(settings);
+    application.send_message("*plain*");
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen).contains("plain"))
+        .await;
+    let row = (0..screen.area.height)
+        .find(|&row| {
+            (0..screen.area.width)
+                .map(|column| screen[(column, row)].symbol())
+                .collect::<String>()
+                .trim()
+                == "plain"
+        })
+        .expect("the message is visible");
+    application.scroll_mouse(MouseEventKind::Down(MouseButton::Left), 0, row);
+    application.scroll_mouse(MouseEventKind::Drag(MouseButton::Left), 4, row);
+    application.scroll_mouse(MouseEventKind::Up(MouseButton::Left), 4, row);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if std::fs::read_to_string(&clipboard_path).is_ok_and(|text| text == "plain") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the clipboard receives the displayed text");
+}
+
+#[tokio::test]
+async fn user_reads_markdown_in_message() {
+    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}
+    }));
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
+    application.send_message("## Heading **bold** *plain* `code` [link](https://example.com)");
+    let screen = application
+        .wait_for_screen(|screen| {
+            read_history(screen).contains("## Heading bold plain code https://example.com")
+        })
+        .await;
+    let row = (0..screen.area.height)
+        .find(|&row| {
+            (0..screen.area.width)
+                .map(|column| screen[(column, row)].symbol())
+                .collect::<String>()
+                .contains("## Heading bold plain code")
+        })
+        .expect("the message is visible");
+    assert!(screen[(0, row)].modifier.contains(Modifier::BOLD));
+    assert!(screen[(11, row)].modifier.contains(Modifier::BOLD));
+    assert!(!screen[(16, row)].modifier.contains(Modifier::ITALIC));
+    assert_ne!(screen[(22, row)].fg, screen[(16, row)].fg);
+}
+
+#[tokio::test]
+async fn user_reads_markdown_in_model_response() {
+    let (server_address, mut requests) = RecordedLlama::new().start().await;
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}
+    }));
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
+    application.send_message("Write a plan");
+    let request = receive_request(&mut requests).await;
+    send_initial_recorded_response(&request).await;
+    send_remaining_recorded_response(&request).await;
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen).contains("### 5. User collects all debris"))
+        .await;
+    let row = (0..screen.area.height)
+        .find(|&row| {
+            (0..screen.area.width)
+                .map(|column| screen[(column, row)].symbol())
+                .collect::<String>()
+                .contains("### 5. User collects all debris")
+        })
+        .expect("the heading is visible");
+    assert!(screen[(0, row)].modifier.contains(Modifier::BOLD));
+}
+
+#[tokio::test]
+async fn user_reads_code_block() {
+    let (server_address, _requests) = RecordedLlama::new().start().await;
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {"llama": {"address": server_address, "default_model": "model", "models": [{"name": "model"}]}}
+    }));
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
+    application.paste_text("```rust\nfn main() {}\n```");
+    application.press_key(KeyCode::Enter);
+    let screen = application
+        .wait_for_screen(|screen| read_history(screen).contains("fn main() {}"))
+        .await;
+    assert!(read_history(&screen).contains("```rust"));
+    let row = (0..screen.area.height)
+        .find(|&row| {
+            (0..screen.area.width)
+                .map(|column| screen[(column, row)].symbol())
+                .collect::<String>()
+                .contains("fn main() {}")
+        })
+        .expect("the code is visible");
+    assert_ne!(screen[(0, row)].fg, Color::Reset);
+}
+
+#[tokio::test]
 async fn user_reads_long_hyphenated_text() {
     let (server_address, _requests) = RecordedLlama::new().start().await;
     let home = create_home(serde_json::json!({
