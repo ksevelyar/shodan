@@ -56,7 +56,7 @@ pub(crate) struct Statistics {
 }
 
 pub struct Application {
-    pub(crate) input: String,
+    pub(crate) input: interface::Input,
     pub(crate) scroll_from_bottom: usize,
     pub(crate) maximum_scroll: usize,
     pub(crate) selection: Option<interface::ScreenSelection>,
@@ -101,7 +101,7 @@ pub fn build(settings: ApplicationSettings) -> Result<(Application, Events), App
         clipboard_command: settings.clipboard_command,
         mode: settings.mode,
         pending_authorization: None,
-        input: String::new(),
+        input: interface::Input::default(),
         scroll_from_bottom: usize::MAX,
         maximum_scroll: 0,
         selection: None,

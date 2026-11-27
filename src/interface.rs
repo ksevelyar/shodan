@@ -1,11 +1,19 @@
 mod edit;
+mod input;
+
+pub(crate) use input::Input;
 
 use std::{io, ops::ControlFlow, path::Path, sync::OnceLock};
 
+#[cfg(unix)]
+use crossterm::event::{
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use crossterm::{
     event::{
-        DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-        KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+        MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -87,10 +95,24 @@ impl From<Palette> for Color {
     }
 }
 
+enum BracketedPaste {
+    Enabled,
+    Disabled,
+}
+
+#[cfg(unix)]
+enum KeyboardReporting {
+    Enabled,
+    Disabled,
+}
+
 struct TerminalSession {
     alternate_screen: bool,
     raw_mode: bool,
     mouse_capture: bool,
+    bracketed_paste: BracketedPaste,
+    #[cfg(unix)]
+    keyboard_reporting: KeyboardReporting,
 }
 
 impl TerminalSession {
@@ -100,15 +122,49 @@ impl TerminalSession {
             alternate_screen: false,
             raw_mode: true,
             mouse_capture: false,
+            bracketed_paste: BracketedPaste::Disabled,
+            #[cfg(unix)]
+            keyboard_reporting: KeyboardReporting::Disabled,
         };
         execute!(io::stdout(), EnterAlternateScreen)?;
         session.alternate_screen = true;
         session.mouse_capture = true;
         execute!(io::stdout(), EnableMouseCapture)?;
+        session.bracketed_paste = BracketedPaste::Enabled;
+        execute!(io::stdout(), EnableBracketedPaste)?;
+        #[cfg(unix)]
+        {
+            session.keyboard_reporting = KeyboardReporting::Enabled;
+            execute!(
+                io::stdout(),
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            )?;
+        }
         Ok(session)
     }
 
     fn restore(&mut self) -> io::Result<()> {
+        #[cfg(unix)]
+        let keyboard_result = if matches!(self.keyboard_reporting, KeyboardReporting::Enabled) {
+            let result = execute!(io::stdout(), PopKeyboardEnhancementFlags);
+            if result.is_ok() {
+                self.keyboard_reporting = KeyboardReporting::Disabled;
+            }
+            result
+        } else {
+            Ok(())
+        };
+        #[cfg(not(unix))]
+        let keyboard_result: io::Result<()> = Ok(());
+        let paste_result = if matches!(self.bracketed_paste, BracketedPaste::Enabled) {
+            let result = execute!(io::stdout(), DisableBracketedPaste);
+            if result.is_ok() {
+                self.bracketed_paste = BracketedPaste::Disabled;
+            }
+            result
+        } else {
+            Ok(())
+        };
         let mouse_result = if self.mouse_capture {
             let result = execute!(io::stdout(), DisableMouseCapture);
             if result.is_ok() {
@@ -136,7 +192,11 @@ impl TerminalSession {
         } else {
             Ok(())
         };
-        mouse_result.and(screen_result).and(raw_result)
+        keyboard_result
+            .and(paste_result)
+            .and(mouse_result)
+            .and(screen_result)
+            .and(raw_result)
     }
 }
 
@@ -244,12 +304,20 @@ where
                 application.screen_area = frame.area();
             }
             draw_interface(frame, application, &mut interface.formatted_messages);
+            let input_height = application
+                .input
+                .get_height(frame.area().width, frame.area().height);
+            let conversation_height = frame
+                .area()
+                .height
+                .saturating_sub(input_height.saturating_add(4));
             draw_selection(
                 frame,
                 &mut application.selection,
                 application
                     .maximum_scroll
                     .saturating_sub(application.scroll_from_bottom),
+                conversation_height,
             );
         })
         .map_err(|error| ApplicationError::Terminal(format!("Terminal failed: {error}")))?;
@@ -270,9 +338,9 @@ where
     Ok(())
 }
 
-#[derive(Clone, Copy)]
 pub(crate) enum InterfaceInput {
     Key(KeyEvent),
+    Paste(String),
     Mouse(MouseEvent),
     Exit,
     Redraw,
@@ -290,6 +358,7 @@ where
             Ok(InterfaceInput::Key(key))
         }
         Some(Ok(Event::Mouse(mouse))) => Ok(InterfaceInput::Mouse(mouse)),
+        Some(Ok(Event::Paste(text))) => Ok(InterfaceInput::Paste(text)),
         Some(Ok(_)) => Ok(InterfaceInput::Redraw),
         Some(Err(error)) => Err(ApplicationError::Terminal(format!(
             "Terminal failed: {error}"
@@ -311,6 +380,10 @@ pub(crate) fn handle_input(
         }
         InterfaceInput::Key(key) => {
             handle_key(application, key);
+            ControlFlow::Continue(())
+        }
+        InterfaceInput::Paste(text) => {
+            application.input.insert(&text);
             ControlFlow::Continue(())
         }
         InterfaceInput::Mouse(mouse) => {
@@ -337,10 +410,33 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
         KeyCode::Char(character)
             if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
         {
-            application.input.push(character);
+            application.input.insert(&character.to_string());
         }
         KeyCode::Backspace => {
-            application.input.pop();
+            application.input.delete_previous();
+        }
+        KeyCode::Left => application.input.move_left(),
+        KeyCode::Right => application.input.move_right(),
+        KeyCode::Up | KeyCode::Down => {
+            let history = application
+                .session
+                .messages
+                .iter()
+                .filter_map(|message| {
+                    if let Message::User(text) = message {
+                        Some(text.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            let width = usize::from(application.screen_area.width);
+            application
+                .input
+                .move_vertical(key.code == KeyCode::Up, width, &history);
+        }
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            application.input.insert("\n");
         }
         KeyCode::Esc => abort_response(application),
         KeyCode::Tab if !matches!(application.mode, crate::settings::Mode::OpenaiLogin) => {
@@ -351,10 +447,9 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
             application.error = None;
         }
         KeyCode::Enter
-            if application.pending_authorization.is_some()
-                && !application.input.trim().is_empty() =>
+            if application.pending_authorization.is_some() && !application.input.is_empty() =>
         {
-            let input = std::mem::take(&mut application.input);
+            let input = application.input.take();
             if let Some(pending_authorization) = &application.pending_authorization {
                 let _ = pending_authorization.send(input);
             }
@@ -362,9 +457,9 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
         KeyCode::Enter
             if !matches!(application.mode, crate::settings::Mode::OpenaiLogin)
                 && application.response_started.is_none()
-                && !application.input.trim().is_empty() =>
+                && !application.input.is_empty() =>
         {
-            let input = std::mem::take(&mut application.input);
+            let input = application.input.take();
             send_message(application, input);
             application.scroll_from_bottom = 0;
         }
@@ -386,7 +481,8 @@ fn get_selection_position(
         return None;
     }
     let row = mouse.row.clamp(area.y, area.bottom() - 1) - area.y;
-    let conversation_height = area.height.saturating_sub(5);
+    let input_height = application.input.get_height(area.width, area.height);
+    let conversation_height = area.height.saturating_sub(input_height.saturating_add(4));
     let selection_row = if row == 0 {
         SelectionRow::Top
     } else if row <= conversation_height {
@@ -479,7 +575,8 @@ pub(crate) fn advance_selection_scroll(application: &mut Application) {
         return;
     };
     let area = application.screen_area;
-    let conversation_height = area.height.saturating_sub(5);
+    let input_height = application.input.get_height(area.width, area.height);
+    let conversation_height = area.height.saturating_sub(input_height.saturating_add(4));
     if conversation_height == 0 {
         return;
     }
@@ -497,6 +594,7 @@ fn draw_selection(
     frame: &mut Frame<'_>,
     selection: &mut Option<ScreenSelection>,
     viewport_start: usize,
+    conversation_height: u16,
 ) {
     let Some(active_selection) = selection.as_mut() else {
         return;
@@ -507,7 +605,6 @@ fn draw_selection(
     let start = active_selection.anchor.min(active_selection.focus);
     let end = active_selection.anchor.max(active_selection.focus);
     let area = frame.area();
-    let conversation_height = area.height.saturating_sub(5);
     let buffer = frame.buffer_mut();
     let mut positions = Vec::new();
     for row in 0..area.height {
@@ -939,7 +1036,9 @@ fn draw_interface(
     application: &mut Application,
     formatted_messages: &mut FormattedMessages,
 ) {
-    let input = application.input.as_str();
+    let input_height = application
+        .input
+        .get_height(frame.area().width, frame.area().height);
     let statistics = &application.statistics;
     let scroll_from_bottom = &mut application.scroll_from_bottom;
     let maximum_scroll = &mut application.maximum_scroll;
@@ -951,7 +1050,7 @@ fn draw_interface(
     let areas = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(input_height),
         Constraint::Length(1),
         Constraint::Length(1),
     ])
@@ -991,21 +1090,7 @@ fn draw_interface(
             area,
         );
     }
-    let input_width = input.width();
-    let viewport_width = usize::from(areas[2].width);
-    let horizontal_scroll = input_width.saturating_sub(viewport_width.saturating_sub(1));
-    let horizontal_scroll = u16::try_from(horizontal_scroll).unwrap_or(u16::MAX);
-    frame.render_widget(
-        Paragraph::new(input).scroll((0, horizontal_scroll)),
-        areas[2],
-    );
-    if areas[2].width > 0 && areas[2].height > 0 {
-        let cursor_column = input_width
-            .saturating_sub(usize::from(horizontal_scroll))
-            .min(viewport_width - 1);
-        let cursor_column = u16::try_from(cursor_column).unwrap_or(u16::MAX);
-        frame.set_cursor_position((areas[2].x + cursor_column, areas[2].y));
-    }
+    application.input.draw(frame, areas[2]);
     draw_status(
         frame,
         areas[4],

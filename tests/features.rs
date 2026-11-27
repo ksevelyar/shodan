@@ -1,6 +1,7 @@
 mod features {
     mod chat;
     mod context_switching;
+    mod interface;
     mod llama;
     mod models;
     mod openai;

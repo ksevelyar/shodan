@@ -4,7 +4,6 @@
 
 * The user can scroll through conversation history.
 * The user can scroll through tool results and abort while a response is in progress.
-* A textarea allows the user to compose messages.
 * The status panel remains visible at the bottom while the user scrolls through conversation history.
 * User can select text across the interface by dragging the mouse.
 * User can scroll conversation history while keeping a selection.

@@ -378,8 +378,14 @@ pub fn run_test_application(settings: ApplicationSettings) -> TestApplication {
 pub fn run_test_application_with_configured_clipboard(
     settings: ApplicationSettings,
 ) -> TestApplication {
-    let width = 120;
-    let height = 24;
+    run_test_application_with_size(settings, 120, 24)
+}
+
+pub fn run_test_application_with_size(
+    settings: ApplicationSettings,
+    width: u16,
+    height: u16,
+) -> TestApplication {
     let backend = TestBackend::new(width, height);
     let (frames, receiver) = watch::channel(backend.buffer().clone());
     let backend = SharedTerminal { backend, frames };
@@ -403,6 +409,19 @@ impl TestApplication {
         let key = KeyEvent::new(code, KeyModifiers::NONE);
         self.events
             .send(Ok(Event::Key(key)))
+            .expect("the application receives terminal input");
+    }
+
+    pub fn press_shift_enter(&self) {
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
+        self.events
+            .send(Ok(Event::Key(key)))
+            .expect("the application receives terminal input");
+    }
+
+    pub fn paste_text(&self, text: &str) {
+        self.events
+            .send(Ok(Event::Paste(text.to_owned())))
             .expect("the application receives terminal input");
     }
 
