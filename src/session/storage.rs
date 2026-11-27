@@ -6,7 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::chats::Message;
+use crate::{chats::Message, session::Statistics};
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct SessionSnapshot {
@@ -14,6 +14,8 @@ pub(super) struct SessionSnapshot {
     pub model: String,
     pub provider: String,
     pub messages: Vec<Message>,
+    #[serde(default)]
+    pub statistics: Statistics,
 }
 
 pub(super) fn get_directory(home_directory: &Path) -> io::Result<PathBuf> {

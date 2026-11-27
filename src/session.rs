@@ -9,9 +9,18 @@ use crate::{
 
 const CONTEXT_NAMES: [&str; 4] = ["read", "edit", "review", "blank"];
 
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Statistics {
+    pub prompt_tokens: u64,
+    pub cached_tokens: u64,
+    pub completion_tokens: u64,
+    pub response_time: Option<std::time::Duration>,
+}
+
 pub(crate) struct Session {
     pub provider: Provider,
     pub messages: Vec<Message>,
+    pub statistics: Statistics,
     pub turn: u64,
     pub turn_start: usize,
     selected_model_position: usize,
@@ -49,6 +58,7 @@ impl Session {
         let mut session = Self {
             provider,
             messages: Vec::new(),
+            statistics: Statistics::default(),
             turn: 0,
             turn_start: 0,
             selected_model_position,
@@ -91,6 +101,7 @@ impl Session {
                     ))
                 })?;
             session.messages = snapshot.messages;
+            session.statistics = snapshot.statistics;
         } else {
             session.clear_messages();
         }
@@ -106,6 +117,7 @@ impl Session {
             model: self.get_selected_model().name.clone(),
             provider: self.provider.get_name().to_owned(),
             messages: self.messages.clone(),
+            statistics: self.statistics.clone(),
         };
         storage::write_session(&self.storage_path, &snapshot).map_err(|error| {
             ApplicationError::Output(format!(
@@ -208,6 +220,7 @@ impl Session {
             .storage_path
             .with_file_name(format!("{}.jsonl", uuid::Uuid::new_v4()));
         self.saved = false;
+        self.statistics = Statistics::default();
         self.clear_messages();
         if let Some(content) = last_response {
             self.messages.push(Message::Model {

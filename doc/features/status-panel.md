@@ -8,6 +8,8 @@
 * The right side displays the provider and model name.
 * The rightmost element displays the selected model's thinking level when defined.
 * Cache hits are displayed as a percentage rounded to the nearest whole number.
+* Session statistics and the latest response time are restored with the session.
+* A new session starts with empty statistics.
 
 ## User scenarios
 ### 1. User views session statistics
@@ -35,7 +37,15 @@
 * User starts a session with Qwen3.8-27B-UD-IQ4_XS.
 * User sees `llama Qwen3.8-27B-UD-IQ4_XS low` on the right of the bottom panel.
 
-### 5. User views rounded cache hits
+### 5. User restores session statistics
+
+* User receives a response with 82 prompt tokens and 383 completion tokens.
+* User restores the session and sees the response time and `↑82 ↓383 CH0%`.
+* User receives another response with 82 prompt tokens and 383 completion tokens.
+* User sees `↑164 ↓766 CH0%`.
+* User starts a new session and sees `↑0 ↓0 CH0%`.
+
+### 6. User views rounded cache hits
 
 * User sends a message to Qwen3.8-27B-UD-IQ4_XS.
 * User receives a response with 85 prompt tokens and 81 cached tokens.

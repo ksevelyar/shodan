@@ -33,8 +33,9 @@ use tokio::io::AsyncWriteExt;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
-    application::{Application, ApplicationError, Statistics},
+    application::{Application, ApplicationError},
     chats::{Message, ToolCall, abort_response, send_message},
+    session::Statistics,
     tools::{ReadDisplay, ToolDisplay},
 };
 
@@ -1099,7 +1100,7 @@ fn draw_interface(
     let input_height = application
         .input
         .get_height(frame.area().width, frame.area().height);
-    let statistics = &application.statistics;
+    let statistics = &application.session.statistics;
     let scroll_from_bottom = &mut application.scroll_from_bottom;
     let maximum_scroll = &mut application.maximum_scroll;
     let panels = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(frame.area());

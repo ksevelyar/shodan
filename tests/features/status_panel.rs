@@ -131,6 +131,49 @@ async fn user_views_session_statistics() {
 }
 
 #[tokio::test]
+async fn user_restores_session_statistics() {
+    let (address, mut requests) = RecordedProvider::new().start().await;
+    let home = create_home(serde_json::json!({
+        "default_provider": "llama",
+        "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}
+    }));
+    let settings = build_settings(home.path().to_owned(), Vec::new()).expect("settings are valid");
+    let mut application = run_test_application(settings);
+    application.send_message("Hello");
+    let request = receive_request(&mut requests).await;
+    send_recorded_response(&request).await;
+    application
+        .wait_for_screen(|screen| {
+            read_bottom_line(screen).contains("⏱")
+                && read_bottom_line(screen).contains("↑82 ↓383 CH0%")
+        })
+        .await;
+    drop(application);
+    let settings = build_settings(
+        home.path().to_owned(),
+        vec!["--session".to_owned(), "0".to_owned()],
+    )
+    .expect("settings are valid");
+    let mut application = run_test_application(settings);
+    application
+        .wait_for_screen(|screen| {
+            read_bottom_line(screen).contains("⏱")
+                && read_bottom_line(screen).contains("↑82 ↓383 CH0%")
+        })
+        .await;
+    application.send_message("Continue");
+    let request = receive_request(&mut requests).await;
+    send_recorded_response(&request).await;
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("↑164 ↓766 CH0%"))
+        .await;
+    application.press_control_tab();
+    application
+        .wait_for_screen(|screen| read_bottom_line(screen).contains("↑0 ↓0 CH0%"))
+        .await;
+}
+
+#[tokio::test]
 async fn user_scrolls_conversation() {
     let (server_address, mut requests) = RecordedProvider::new().start().await;
     let home = create_home(serde_json::json!({

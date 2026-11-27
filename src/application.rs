@@ -1,4 +1,4 @@
-use std::{error::Error, fmt, io, io::Write, time::Duration};
+use std::{error::Error, fmt, io, io::Write};
 
 use crossterm::event::Event;
 use futures_util::Stream;
@@ -47,14 +47,6 @@ impl fmt::Display for ApplicationError {
 
 impl Error for ApplicationError {}
 
-#[derive(Default)]
-pub(crate) struct Statistics {
-    pub prompt_tokens: u64,
-    pub cached_tokens: u64,
-    pub completion_tokens: u64,
-    pub response_time: Option<Duration>,
-}
-
 pub struct Application {
     pub(crate) input: interface::Input,
     pub(crate) scroll_from_bottom: usize,
@@ -62,7 +54,6 @@ pub struct Application {
     pub(crate) selection: Option<interface::ScreenSelection>,
     pub(crate) screen_area: ratatui::layout::Rect,
     pub(crate) session: Session,
-    pub(crate) statistics: Statistics,
     pub(crate) error: Option<ApplicationError>,
     pub(crate) event_sender: EventSender,
     pub(crate) active_request: Option<tokio::task::JoinHandle<()>>,
@@ -91,7 +82,6 @@ pub fn build(settings: ApplicationSettings) -> Result<(Application, Events), App
     let (event_sender, background_events) = mpsc::unbounded_channel();
     let application = Application {
         session,
-        statistics: Statistics::default(),
         error: None,
         event_sender,
         active_request: None,

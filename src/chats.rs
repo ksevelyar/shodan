@@ -247,21 +247,23 @@ pub(crate) fn apply_event(application: &mut Application, event: Event) {
             cached_tokens,
         } if turn == application.session.turn && application.response_started.is_some() => {
             application.active_request = None;
-            application.statistics.prompt_tokens += prompt_tokens;
-            application.statistics.cached_tokens += cached_tokens;
-            application.statistics.completion_tokens += completion_tokens;
-            save_session(application);
+            application.session.statistics.prompt_tokens += prompt_tokens;
+            application.session.statistics.cached_tokens += cached_tokens;
+            application.session.statistics.completion_tokens += completion_tokens;
             let Some(Message::Model { tool_calls, .. }) = application.session.messages.last()
             else {
+                save_session(application);
                 return;
             };
             if tool_calls.is_empty() {
-                application.statistics.response_time = application
+                application.session.statistics.response_time = application
                     .response_started
                     .take()
                     .map(|started| started.elapsed());
+                save_session(application);
             } else {
                 application.pending_tool_calls = VecDeque::from(tool_calls.clone());
+                save_session(application);
                 start_next_tool(application);
             }
         }
