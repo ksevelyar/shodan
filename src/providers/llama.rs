@@ -1,9 +1,10 @@
 use super::ProviderConnection;
 use crate::{
     application::ApplicationError,
-    chats::{Message, ToolCall},
+    chats::Message,
     events::{Event, EventSender},
     models::ThinkingLevel,
+    tools::{ToolCall, ToolOutput},
 };
 use eventsource_stream::{Event as ServerSentEvent, Eventsource};
 use futures_util::{Stream, StreamExt};
@@ -111,14 +112,42 @@ async fn post_messages(
                 Some(serde_json::json!({"role": "system", "content": content}))
             }
             Message::User(content) => Some(serde_json::json!({"role": "user", "content": content})),
-            Message::Model { content, tool_calls, aborted: false, .. } if tool_calls.is_empty() => Some(serde_json::json!({"role": "assistant", "content": content})),
-            Message::Model { content, tool_calls, aborted: false, .. } => {
+            Message::Model {
+                content,
+                tool_calls,
+                aborted: false,
+                ..
+            } if tool_calls.is_empty() => {
+                Some(serde_json::json!({"role": "assistant", "content": content}))
+            }
+            Message::Model {
+                content,
+                tool_calls,
+                aborted: false,
+                ..
+            } => {
                 let calls = tool_calls.iter().map(|call| serde_json::json!({"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}})).collect::<Vec<_>>();
-                let content = if content.is_empty() { None } else { Some(content) };
-                Some(serde_json::json!({"role": "assistant", "content": content, "tool_calls": calls}))
+                let content = if content.is_empty() {
+                    None
+                } else {
+                    Some(content)
+                };
+                Some(
+                    serde_json::json!({"role": "assistant", "content": content, "tool_calls": calls}),
+                )
             }
             Message::Model { aborted: true, .. } | Message::FailedResponse(_) => None,
-            Message::ToolResult { call_id, content, .. } => Some(serde_json::json!({"role":"tool", "tool_call_id":call_id, "content":content})),
+            Message::ToolResult { call_id, result } => {
+                let content = match result {
+                    Ok(ToolOutput::ReadImage { content, image_url, .. }) => serde_json::json!([
+                        {"type": "text", "text": content},
+                        {"type": "image_url", "image_url": {"url": image_url}}
+                    ]),
+                    Ok(output) => serde_json::json!(output.content()),
+                    Err(error) => serde_json::json!(error),
+                };
+                Some(serde_json::json!({"role": "tool", "tool_call_id": call_id, "content": content}))
+            }
         })
         .collect::<Vec<_>>();
     let mut request = serde_json::json!({"model": model, "messages": messages, "tools": available_tools, "stream": true, "stream_options": {"include_usage": true}});

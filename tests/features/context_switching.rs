@@ -75,6 +75,8 @@ async fn user_switches_contexts_and_keeps_conversation() {
         "default_provider": "llama",
         "providers": {"llama": {"address": address, "default_model": "model", "models": [{"name": "model"}]}}
     }));
+    std::fs::write(home.path().join(".shodan/read.md"), "Read instructions")
+        .expect("the read prompt can be written");
     std::fs::write(home.path().join(".shodan/edit.md"), "Edit instructions")
         .expect("the edit prompt can be written");
     std::fs::write(home.path().join(".shodan/review.md"), "Review instructions")
@@ -84,15 +86,20 @@ async fn user_switches_contexts_and_keeps_conversation() {
     application.send_message("Hello");
     let request = receive_request(&mut requests).await;
     send_recorded_response(&request).await;
-    application
+    let screen = application
         .wait_for_screen(|screen| read_bottom_line(screen).contains('⏱'))
         .await;
+    let conversation = read_history(&screen);
     application.press_key(KeyCode::Tab);
+    let screen = application
+        .wait_for_screen(|screen| read_screen(screen).starts_with("edit"))
+        .await;
+    assert_eq!(read_history(&screen), conversation);
+    for _ in 0..10 {
+        application.press_key(KeyCode::PageUp);
+    }
     application
-        .wait_for_screen(|screen| {
-            read_screen(screen).starts_with("edit")
-                && read_history(screen).contains("Edit instructions")
-        })
+        .wait_for_screen(|screen| read_history(screen).contains("Edit instructions"))
         .await;
     application.send_message("Continue");
     let request = receive_request(&mut requests).await;

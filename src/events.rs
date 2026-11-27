@@ -7,8 +7,9 @@ use tokio::sync::mpsc;
 
 use crate::{
     application::{Application, ApplicationError},
-    chats::{self, Message, ToolCall},
+    chats::{self, Message},
     interface::{self, Interface},
+    tools::{ToolCall, ToolOutput},
 };
 
 pub enum Event {
@@ -40,9 +41,7 @@ pub enum Event {
     ToolCompleted {
         turn: u64,
         call_id: String,
-        content: String,
-        display: Option<crate::tools::ToolDisplay>,
-        successful: bool,
+        result: Result<ToolOutput, String>,
     },
     RequestFailed {
         turn: u64,

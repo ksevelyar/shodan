@@ -36,9 +36,9 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     application::{Application, ApplicationError},
-    chats::{Message, ToolCall, abort_response, send_message},
+    chats::{Message, abort_response, send_message},
     session::Statistics,
-    tools::{ReadDisplay, ToolDisplay},
+    tools::{ToolCall, ToolOutput},
 };
 
 pub(crate) async fn copy_to_clipboard(text: &str, command: Option<&[String]>) -> bool {
@@ -427,7 +427,9 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
             application
                 .session
                 .cycle_context(key.modifiers.contains(KeyModifiers::CONTROL));
-            application.scroll_from_bottom = usize::MAX;
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                application.scroll_from_bottom = usize::MAX;
+            }
             application.selection = None;
             application.error = application.session.save(false).err();
         }
@@ -748,26 +750,30 @@ fn format_bash_command(command: &str, background: Color, width: usize) -> Vec<Li
     lines
 }
 
-fn format_read_result(content: &str, display: &ReadDisplay, width: usize) -> Vec<Line<'static>> {
+fn format_read_result(
+    content: &str,
+    path: &str,
+    offset: usize,
+    preceding_content: &str,
+    width: usize,
+) -> Vec<Line<'static>> {
     static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
     let syntaxes = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
-    let syntax = Path::new(&display.path)
+    let syntax = Path::new(path)
         .extension()
         .and_then(|extension| extension.to_str())
         .and_then(|extension| syntaxes.find_syntax_by_extension(extension))
         .unwrap_or_else(|| syntaxes.find_syntax_plain_text());
     let mut highlighter = HighlightLines::new(syntax, get_syntax_theme());
-    for line in display.preceding_content.split_inclusive('\n') {
+    for line in preceding_content.split_inclusive('\n') {
         let _ = highlighter.highlight_line(line, syntaxes);
     }
     let line_count = content.lines().count();
-    let number_width = (display.offset + line_count.saturating_sub(1))
-        .to_string()
-        .len();
+    let number_width = (offset + line_count.saturating_sub(1)).to_string().len();
     let background = Color::from(Palette::Background);
     let mut output = Vec::new();
     for (position, line) in content.split_inclusive('\n').enumerate() {
-        let prefix = format!("{:>number_width$}  ", display.offset + position);
+        let prefix = format!("{:>number_width$}  ", offset + position);
         let mut spans = vec![Span::styled(
             prefix.clone(),
             Style::default()
@@ -819,12 +825,9 @@ fn get_tool_call_background(call: &ToolCall, messages: &[Message]) -> Color {
     messages
         .iter()
         .find_map(|message| match message {
-            Message::ToolResult {
-                call_id,
-                successful,
-                display,
-                ..
-            } if call_id == &call.id => Some(get_tool_background(*successful, display.as_ref())),
+            Message::ToolResult { call_id, result } if call_id == &call.id => {
+                Some(get_tool_background(result.is_ok()))
+            }
             _ => None,
         })
         .unwrap_or_else(|| Color::from(Palette::Background))
@@ -901,30 +904,36 @@ fn format_conversation_section(
 fn format_file_result(message: &Message, width: usize) -> Option<Vec<Line<'static>>> {
     match message {
         Message::ToolResult {
+            result:
+                Ok(ToolOutput::ReadText {
+                    path,
+                    content,
+                    offset,
+                    preceding_content,
+                }),
+            ..
+        } => Some(format_read_result(
             content,
-            display: Some(ToolDisplay::Read(display)),
-            ..
-        } => Some(format_read_result(content, display, width)),
+            path,
+            *offset,
+            preceding_content,
+            width,
+        )),
         Message::ToolResult {
-            display: Some(ToolDisplay::Write(display)),
+            result: Ok(ToolOutput::ReadImage { path, content, .. }),
             ..
-        } => {
-            let read_display = ReadDisplay {
-                path: display.path.clone(),
-                offset: 1,
-                preceding_content: String::new(),
-            };
-            Some(format_read_result(&display.content, &read_display, width))
-        }
+        } => Some(format_read_result(content, path, 1, "", width)),
+        Message::ToolResult {
+            result: Ok(ToolOutput::Write {
+                path, file_content, ..
+            }),
+            ..
+        } => Some(format_read_result(file_content, path, 1, "", width)),
         _ => None,
     }
 }
 
-fn get_tool_background(successful: Option<bool>, display: Option<&ToolDisplay>) -> Color {
-    let successful = successful.unwrap_or(!matches!(
-        display,
-        Some(ToolDisplay::Bash { successful: false })
-    ));
+fn get_tool_background(successful: bool) -> Color {
     Color::from(if successful {
         Palette::Background
     } else {
@@ -932,12 +941,12 @@ fn get_tool_background(successful: Option<bool>, display: Option<&ToolDisplay>) 
     })
 }
 
-fn get_tool_result_style(successful: Option<bool>, display: Option<&ToolDisplay>) -> Style {
-    let background = get_tool_background(successful, display);
-    let foreground = if background == Color::from(Palette::Error) {
-        Color::from(Palette::Background)
-    } else {
+fn get_tool_result_style(successful: bool) -> Style {
+    let background = get_tool_background(successful);
+    let foreground = if successful {
         Color::from(Palette::Text)
+    } else {
+        Color::from(Palette::Background)
     };
     Style::default().fg(foreground).bg(background)
 }
@@ -955,11 +964,17 @@ fn format_messages(
             continue;
         }
         if let Message::ToolResult {
-            display: Some(ToolDisplay::Edit(display)),
+            result:
+                Ok(ToolOutput::Edit {
+                    path,
+                    original,
+                    updated,
+                    ..
+                }),
             ..
         } = message
         {
-            lines.extend(edit::format_edit_result(display, width));
+            lines.extend(edit::format_edit_result(path, original, updated, width));
             lines.push(Line::default());
             continue;
         }
@@ -983,19 +998,20 @@ fn format_messages(
                 false,
                 false,
             ),
-            Message::ToolResult {
-                content,
-                successful,
-                display,
-                ..
-            } => (
-                vec![(
-                    content.trim_end_matches('\n').to_owned(),
-                    get_tool_result_style(*successful, display.as_ref()),
-                )],
-                false,
-                false,
-            ),
+            Message::ToolResult { result, .. } => {
+                let content = match result {
+                    Ok(output) => output.content(),
+                    Err(error) => error,
+                };
+                (
+                    vec![(
+                        content.trim_end_matches('\n').to_owned(),
+                        get_tool_result_style(result.is_ok()),
+                    )],
+                    false,
+                    false,
+                )
+            }
             Message::Model {
                 content,
                 thinking,

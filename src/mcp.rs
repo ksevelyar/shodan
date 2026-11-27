@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{process::Stdio, sync::Arc, time::Duration};
 
 use rmcp::{
     ServiceExt,
@@ -19,7 +19,10 @@ impl Connection {
         let (executable, arguments) = command.split_first().ok_or("MCP server command is empty")?;
         let mut process = Command::new(executable);
         process.args(arguments);
-        let transport = TokioChildProcess::new(process).map_err(|error| error.to_string())?;
+        let (transport, _) = TokioChildProcess::builder(process)
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| error.to_string())?;
         let service = tokio::time::timeout(Duration::from_secs(10), ().serve(transport))
             .await
             .map_err(|_| "MCP initialization timed out".to_owned())?

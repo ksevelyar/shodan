@@ -4,12 +4,7 @@ use tokio::time::Instant;
 
 use crate::{application::Application, events::Event, providers, tools};
 
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ToolCall {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) arguments: String,
-}
+use crate::tools::ToolCall;
 
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum Message {
@@ -24,10 +19,7 @@ pub(crate) enum Message {
     },
     ToolResult {
         call_id: String,
-        content: String,
-        display: Option<tools::ToolDisplay>,
-        #[serde(default)]
-        successful: Option<bool>,
+        result: Result<tools::ToolOutput, String>,
     },
     FailedResponse(String),
 }
@@ -147,7 +139,7 @@ fn start_next_tool(application: &mut Application) {
     let connection = application.blender_connection.clone();
     application.active_request = Some(tokio::spawn(async move {
         let original_name = call.name.strip_prefix("blender_");
-        let (content, display, successful) = if let (Some(connection), Some(name)) = (
+        let result = if let (Some(connection), Some(name)) = (
             connection.as_ref(),
             original_name.filter(|name| {
                 connection
@@ -156,22 +148,20 @@ fn start_next_tool(application: &mut Application) {
             }),
         ) {
             let (content, successful) = connection.call(name, &call.arguments).await;
-            (content, None, successful)
+            if successful {
+                Ok(tools::ToolOutput::Text { content })
+            } else {
+                Err(content)
+            }
         } else if allowed {
             tools::execute(&call.name, &call.arguments).await
         } else {
-            (
-                "Error: tool unavailable in read context".to_owned(),
-                None,
-                false,
-            )
+            Err("Error: tool unavailable in read context".to_owned())
         };
         let _ = event_sender.send(Event::ToolCompleted {
             turn,
             call_id: call.id,
-            content,
-            display,
-            successful,
+            result,
         });
     }));
 }
@@ -294,17 +284,13 @@ pub(crate) fn apply_event(application: &mut Application, event: Event) {
         Event::ToolCompleted {
             turn,
             call_id,
-            content,
-            display,
-            successful,
+            result,
         } if turn == application.session.turn && application.response_started.is_some() => {
             application.active_request = None;
-            application.session.messages.push(Message::ToolResult {
-                call_id,
-                content,
-                display,
-                successful: Some(successful),
-            });
+            application
+                .session
+                .messages
+                .push(Message::ToolResult { call_id, result });
             save_session(application);
             start_next_tool(application);
         }

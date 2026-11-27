@@ -1,6 +1,6 @@
 [package]
 name = "shodan"
-version = "0.16.0"
+version = "0.17.0"
 edition = "2024"
 
 [lib]
@@ -19,6 +19,7 @@ eventsource-stream = "0.2.3"
 futures-util = "0.3.34"
 globset = "0.4.22"
 ignore = "0.4.35"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
 pulldown-cmark = "0.13"
 ratatui = "0.30"
 regex = "1.13.2"

@@ -489,3 +489,166 @@ async fn user_reads_nonexistent_file() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn user_asks_model_to_describe_image_with_one_word() {
+    use base64::Engine;
+
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
+    let home = create_openai_home(&address);
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
+    let path = "tests/features/fixtures/mcp/blender/describe-image-with-one-word.png";
+    application.send_message(&format!(
+        "Read {path} using the read tool and describe the image in one word."
+    ));
+    let first_request = receive_request(&mut requests).await;
+    let tools = first_request.body["tools"]
+        .as_array()
+        .expect("tools are available");
+    let read = tools
+        .iter()
+        .find(|tool| tool["name"] == "read")
+        .expect("read is available");
+    assert!(
+        read["description"]
+            .as_str()
+            .expect("description is text")
+            .contains("image")
+    );
+    send_response_bytes(&first_request, include_str!("../fixtures/openai/tools/user_asks_model_to_describe_image_with_one_word/response-1.txt")).await;
+    let second_request = receive_request(&mut requests).await;
+    let input = second_request.body["input"]
+        .as_array()
+        .expect("input is an array");
+    let call = input
+        .iter()
+        .find(|item| item["type"] == "function_call" && item["name"] == "read")
+        .expect("model calls read");
+    let arguments: serde_json::Value =
+        serde_json::from_str(call["arguments"].as_str().expect("arguments are text"))
+            .expect("arguments are JSON");
+    assert_eq!(arguments["path"], path);
+    let result = input
+        .iter()
+        .find(|item| item["type"] == "function_call_output" && item["call_id"] == call["call_id"])
+        .expect("result follows call");
+    let image = result["output"]
+        .as_array()
+        .expect("output contains image")
+        .iter()
+        .find(|item| item["type"] == "input_image")
+        .expect("image is present");
+    let image_url = image["image_url"].as_str().expect("image URL is text");
+    let data = image_url
+        .strip_prefix("data:image/png;base64,")
+        .expect("image is PNG");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .expect("image data is base64");
+    assert_eq!(
+        bytes,
+        std::fs::read(path).expect("image fixture is readable")
+    );
+    application
+        .wait_for_screen(|screen| {
+            let history = read_history(screen);
+            history.contains(&format!("read {path}"))
+                && history.contains("Read image file [image/png]")
+        })
+        .await;
+    send_response_bytes(&second_request, include_str!("../fixtures/openai/tools/user_asks_model_to_describe_image_with_one_word/response-2.txt")).await;
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("Molecule"))
+        .await;
+}
+
+async fn verify_converted_image(
+    path: &str,
+    original_dimensions: &str,
+    output_dimensions: (u32, u32),
+    first_response: &str,
+    second_response: &str,
+) {
+    use base64::Engine;
+    use image::GenericImageView;
+
+    let (address, mut requests) = RecordedProvider::new().start_openai().await;
+    let home = create_openai_home(&address);
+    let settings =
+        build_settings(home.path().to_owned(), Vec::new()).expect("the settings can be built");
+    let mut application = run_test_application(settings);
+    application.send_message(&format!(
+        "Read {path} using the read tool and describe the image in one word."
+    ));
+    let first_request = receive_request(&mut requests).await;
+    send_response_bytes(&first_request, first_response).await;
+    let second_request = receive_request(&mut requests).await;
+    let input = second_request.body["input"]
+        .as_array()
+        .expect("input is an array");
+    let call = input
+        .iter()
+        .find(|item| item["type"] == "function_call" && item["name"] == "read")
+        .expect("model calls read");
+    let arguments: serde_json::Value =
+        serde_json::from_str(call["arguments"].as_str().expect("arguments are text"))
+            .expect("arguments are JSON");
+    assert_eq!(arguments["path"], path);
+    let result = input
+        .iter()
+        .find(|item| item["type"] == "function_call_output" && item["call_id"] == call["call_id"])
+        .expect("result follows call");
+    let image = result["output"]
+        .as_array()
+        .expect("output contains image")
+        .iter()
+        .find(|item| item["type"] == "input_image")
+        .expect("image is present");
+    let data = image["image_url"]
+        .as_str()
+        .expect("image URL is text")
+        .strip_prefix("data:image/jpeg;base64,")
+        .expect("image is JPEG");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .expect("image data is base64");
+    let decoded = image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg)
+        .expect("image is JPEG");
+    assert_eq!(decoded.dimensions(), output_dimensions);
+    let output = format!("{}x{}", output_dimensions.0, output_dimensions.1);
+    application
+        .wait_for_screen(|screen| {
+            let history = read_history(screen);
+            history.contains(&format!("read {path}"))
+                && history.contains(original_dimensions)
+                && history.contains(&output)
+        })
+        .await;
+    send_response_bytes(&second_request, second_response).await;
+    application
+        .wait_for_screen(|screen| read_history(screen).contains("Cyberpunk."))
+        .await;
+}
+
+#[tokio::test]
+async fn user_asks_model_to_read_image_with_large_dimensions() {
+    verify_converted_image("tests/features/fixtures/mcp/blender/akira.png", "2560x1600", (2000, 1250), include_str!("../fixtures/openai/tools/user_asks_model_to_read_image_with_large_dimensions/response-1.txt"), include_str!("../fixtures/openai/tools/user_asks_model_to_read_image_with_large_dimensions/response-2.txt")).await;
+}
+
+#[tokio::test]
+async fn user_asks_model_to_read_large_image_file() {
+    verify_converted_image(
+        "tests/features/fixtures/mcp/blender/akira.bmp",
+        "1999x1249",
+        (1999, 1249),
+        include_str!(
+            "../fixtures/openai/tools/user_asks_model_to_read_large_image_file/response-1.txt"
+        ),
+        include_str!(
+            "../fixtures/openai/tools/user_asks_model_to_read_large_image_file/response-2.txt"
+        ),
+    )
+    .await;
+}

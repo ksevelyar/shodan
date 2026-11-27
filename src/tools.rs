@@ -122,31 +122,51 @@ struct DirectoryArguments {
 }
 
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum ToolDisplay {
-    Read(ReadDisplay),
-    Write(WriteDisplay),
-    Edit(EditDisplay),
-    Bash { successful: bool },
+pub struct ToolCall {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) arguments: String,
 }
 
 #[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct EditDisplay {
-    pub path: String,
-    pub original: String,
-    pub updated: String,
+pub enum ToolOutput {
+    Text {
+        content: String,
+    },
+    ReadText {
+        path: String,
+        content: String,
+        offset: usize,
+        preceding_content: String,
+    },
+    ReadImage {
+        path: String,
+        content: String,
+        image_url: String,
+    },
+    Write {
+        path: String,
+        content: String,
+        file_content: String,
+    },
+    Edit {
+        path: String,
+        content: String,
+        original: String,
+        updated: String,
+    },
 }
 
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ReadDisplay {
-    pub path: String,
-    pub offset: usize,
-    pub preceding_content: String,
-}
-
-#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct WriteDisplay {
-    pub path: String,
-    pub content: String,
+impl ToolOutput {
+    pub(crate) fn content(&self) -> &str {
+        match self {
+            Self::Text { content }
+            | Self::ReadText { content, .. }
+            | Self::ReadImage { content, .. }
+            | Self::Write { content, .. }
+            | Self::Edit { content, .. } => content,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -179,72 +199,86 @@ pub(crate) fn is_available(name: &str, read_context: bool) -> bool {
     !read_context || !matches!(name, "edit" | "write")
 }
 
-pub(crate) async fn execute(name: &str, arguments: &str) -> (String, Option<ToolDisplay>, bool) {
-    match execute_call(name, arguments).await {
-        Ok((content, display)) => {
-            let successful = !matches!(display, Some(ToolDisplay::Bash { successful: false }));
-            (content, display, successful)
-        }
-        Err(error) => (format!("Error: {error}"), None, false),
+pub(crate) async fn execute(name: &str, arguments: &str) -> Result<ToolOutput, String> {
+    if name == "bash" {
+        let arguments: CommandArguments =
+            parse_arguments(arguments).map_err(|error| format!("Error: {error}"))?;
+        let (content, successful) = bash::run_command(&arguments.command)
+            .await
+            .map_err(|error| format!("Error: tool: Failed to run bash command: {error}"))?;
+        return if successful {
+            Ok(ToolOutput::Text { content })
+        } else {
+            Err(content)
+        };
     }
+    execute_call(name, arguments)
+        .await
+        .map_err(|error| format!("Error: {error}"))
 }
 
-async fn execute_call(
-    name: &str,
-    arguments: &str,
-) -> Result<(String, Option<ToolDisplay>), String> {
+async fn execute_call(name: &str, arguments: &str) -> Result<ToolOutput, String> {
     match name {
-        "grep" => Ok((grep::search(parse_arguments(arguments)?).await?, None)),
-        "find" => Ok((find::find(parse_arguments(arguments)?).await?, None)),
+        "grep" => Ok(ToolOutput::Text {
+            content: grep::search(parse_arguments(arguments)?).await?,
+        }),
+        "find" => Ok(ToolOutput::Text {
+            content: find::find(parse_arguments(arguments)?).await?,
+        }),
         "write" => {
-            let display = write::write_file(parse_arguments(arguments)?).await?;
-            Ok((
-                format!("Successfully wrote {}", display.path),
-                Some(ToolDisplay::Write(display)),
-            ))
+            let (path, file_content) = write::write_file(parse_arguments(arguments)?).await?;
+            Ok(ToolOutput::Write {
+                content: format!("Successfully wrote {path}"),
+                path,
+                file_content,
+            })
         }
         "edit" => {
-            let display = edit::edit_file(parse_arguments(arguments)?).await?;
-            let diff = similar::TextDiff::from_lines(&display.original, &display.updated)
+            let (path, original, updated) = edit::edit_file(parse_arguments(arguments)?).await?;
+            let diff = similar::TextDiff::from_lines(&original, &updated)
                 .unified_diff()
-                .header(&display.path, &display.path)
+                .header(&path, &path)
                 .to_string();
-            Ok((
-                format!("Successfully edited {}.\n{diff}", display.path),
-                Some(ToolDisplay::Edit(display)),
-            ))
+            Ok(ToolOutput::Edit {
+                content: format!("Successfully edited {path}.\n{diff}"),
+                path,
+                original,
+                updated,
+            })
         }
         "read" => {
             let arguments: FileArguments = parse_arguments(arguments)?;
-            let (content, preceding_content) = read::read_file_with_context(
-                Path::new(&arguments.path),
-                arguments.offset,
-                arguments.limit,
-            )
-            .await
-            .map_err(|error| format!("tool: Failed to read file {}: {error}", arguments.path))?;
-            Ok((
-                content,
-                Some(ToolDisplay::Read(ReadDisplay {
+            let path = Path::new(&arguments.path);
+            let image = read::read_image(path).await.map_err(|error| {
+                format!("tool: Failed to read file {}: {error}", arguments.path)
+            })?;
+            if let Some((content, image_url)) = image {
+                Ok(ToolOutput::ReadImage {
                     path: arguments.path,
+                    content,
+                    image_url,
+                })
+            } else {
+                let (content, preceding_content) =
+                    read::read_file_with_context(path, arguments.offset, arguments.limit)
+                        .await
+                        .map_err(|error| {
+                            format!("tool: Failed to read file {}: {error}", arguments.path)
+                        })?;
+                Ok(ToolOutput::ReadText {
+                    path: arguments.path,
+                    content,
                     offset: arguments.offset.unwrap_or(1),
                     preceding_content,
-                })),
-            ))
-        }
-        "bash" => {
-            let arguments: CommandArguments = parse_arguments(arguments)?;
-            let (output, successful) = bash::run_command(&arguments.command)
-                .await
-                .map_err(|error| format!("tool: Failed to run bash command: {error}"))?;
-            Ok((output, Some(ToolDisplay::Bash { successful })))
+                })
+            }
         }
         "ls" => {
             let arguments: DirectoryArguments = parse_arguments(arguments)?;
-            let output = list_directory(Path::new(&arguments.path))
+            let content = list_directory(Path::new(&arguments.path))
                 .await
                 .map_err(|error| error.to_string())?;
-            Ok((output, None))
+            Ok(ToolOutput::Text { content })
         }
         _ => Err(format!("unknown tool: {name}")),
     }

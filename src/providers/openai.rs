@@ -21,9 +21,10 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     application::ApplicationError,
-    chats::{Message, ToolCall},
+    chats::Message,
     events::{Event, EventSender},
     models::ThinkingLevel,
+    tools::{ToolCall, ToolOutput},
 };
 
 #[derive(Deserialize, Serialize)]
@@ -243,11 +244,21 @@ fn build_input(messages: &[Message]) -> (String, Vec<Value>) {
                     input.extend(provider_items.iter().cloned());
                 }
             }
-            Message::ToolResult {
-                call_id, content, ..
-            } => input.push(
-                json!({"type": "function_call_output", "call_id": call_id, "output": content}),
-            ),
+            Message::ToolResult { call_id, result } => {
+                let output = match result {
+                    Ok(ToolOutput::ReadImage {
+                        content, image_url, ..
+                    }) => json!([
+                        {"type": "input_text", "text": content},
+                        {"type": "input_image", "detail": "auto", "image_url": image_url}
+                    ]),
+                    Ok(output) => json!(output.content()),
+                    Err(error) => json!(error),
+                };
+                input.push(
+                    json!({"type": "function_call_output", "call_id": call_id, "output": output}),
+                );
+            }
             Message::Model { aborted: true, .. } | Message::FailedResponse(_) => {}
         }
     }

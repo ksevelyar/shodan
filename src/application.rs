@@ -58,7 +58,7 @@ pub struct Application {
     pub(crate) event_sender: EventSender,
     pub(crate) active_request: Option<tokio::task::JoinHandle<()>>,
     pub(crate) response_started: Option<Instant>,
-    pub(crate) pending_tool_calls: std::collections::VecDeque<crate::chats::ToolCall>,
+    pub(crate) pending_tool_calls: std::collections::VecDeque<crate::tools::ToolCall>,
     home_directory: std::path::PathBuf,
     pub(crate) mode: Mode,
     pub(crate) pending_authorization: Option<mpsc::UnboundedSender<String>>,
