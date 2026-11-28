@@ -4,6 +4,10 @@
 
 * User can ask Shodan to read a text file.
 * User can ask Shodan to read part of a text file.
+* User can ask Shodan to read an image file and respond using its contents.
+* Images exceeding 2000 pixels in either dimension are sent as JPEG images fitting within 2000 by 2000 pixels.
+* Image files exceeding 2 MB are sent as JPEG images.
+* When an image is converted, the read result shows its original and output dimensions.
 * File reading requests show `read` followed by the file path.
 * File reading requests and results share a continuous purple background across the conversation width.
 * File reading results show line numbers from the original file and syntax highlighting for code.
@@ -70,3 +74,29 @@ fn fibonacci(number: u32) -> u64 {
 ```
 
 * Model responds using the file contents.
+
+### 6. User asks model to describe an image with one word
+
+* The image `tests/features/fixtures/mcp/blender/describe-image-with-one-word.png` is available in the project.
+* User asks Shodan to describe the image in one word.
+* Model calls read for the image file.
+* User sees the read request and its result in the conversation.
+* Model responds with the word `Molecule`.
+
+### 7. User asks model to read an image with large dimensions
+
+* The image `tests/features/fixtures/mcp/blender/akira.png` is 2560 by 1600 pixels.
+* User asks Shodan to describe the image.
+* Model calls read for the image file.
+* User sees the read request and a result showing the original dimensions, 2560 by 1600, and the output dimensions, 2000 by 1250.
+* Model receives the image as a 2000 by 1250 JPEG.
+* Model responds using the image contents.
+
+### 8. User asks model to read a large image file
+
+* The image `tests/features/fixtures/mcp/blender/akira.bmp` is 1999 by 1249 pixels and larger than 2 MB.
+* User asks Shodan to describe the image.
+* Model calls read for the image file.
+* User sees the read request and a result showing both the original and output dimensions as 1999 by 1249.
+* Model receives the image as a 1999 by 1249 JPEG.
+* Model responds using the image contents.

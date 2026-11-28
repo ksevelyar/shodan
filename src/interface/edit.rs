@@ -10,8 +10,6 @@ use syntect::{easy::HighlightLines, parsing::SyntaxSet};
 use super::theme::{Palette, get_syntax_theme};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::tools::EditDisplay;
-
 fn highlight_source(content: &str, path: &str) -> Vec<Vec<(syntect::highlighting::Style, String)>> {
     static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
     let syntaxes = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
@@ -82,11 +80,16 @@ fn format_diff_line(
     lines
 }
 
-pub(super) fn format_edit_result(display: &EditDisplay, width: usize) -> Vec<Line<'static>> {
-    let original = highlight_source(&display.original, &display.path);
-    let updated = highlight_source(&display.updated, &display.path);
+pub(super) fn format_edit_result(
+    path: &str,
+    original: &str,
+    updated: &str,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let diff = TextDiff::from_lines(original, updated);
+    let original = highlight_source(original, path);
+    let updated = highlight_source(updated, path);
     let number_width = original.len().max(updated.len()).to_string().len();
-    let diff = TextDiff::from_lines(&display.original, &display.updated);
     let mut lines = Vec::new();
     let context_lines = 3;
     for (group_number, group) in diff.grouped_ops(context_lines).iter().enumerate() {

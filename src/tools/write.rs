@@ -6,7 +6,7 @@ use std::{
 
 use serde::Deserialize;
 
-use super::{WriteDisplay, replace_file_atomically, run_file_mutation};
+use super::{replace_file_atomically, run_file_mutation};
 
 pub(super) fn describe() -> serde_json::Value {
     serde_json::json!({"type":"function","function":{"name":"write","description":"Create or overwrite a text file and create missing parent directories.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path"},"content":{"type":"string","description":"File contents"}},"required":["path","content"]}}})
@@ -18,14 +18,14 @@ pub(super) struct WriteArguments {
     content: String,
 }
 
-pub(super) async fn write_file(arguments: WriteArguments) -> Result<WriteDisplay, String> {
+pub(super) async fn write_file(arguments: WriteArguments) -> Result<(String, String), String> {
     run_file_mutation(move |cancelled| write_contents(arguments, cancelled)).await
 }
 
 fn write_contents(
     arguments: WriteArguments,
     cancelled: &AtomicBool,
-) -> Result<WriteDisplay, String> {
+) -> Result<(String, String), String> {
     let path = Path::new(&arguments.path);
     let parent = path
         .parent()
@@ -56,8 +56,5 @@ fn write_contents(
         cancelled,
     )
     .map_err(|error| error.to_string())?;
-    Ok(WriteDisplay {
-        path: arguments.path,
-        content: arguments.content,
-    })
+    Ok((arguments.path, arguments.content))
 }

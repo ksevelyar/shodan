@@ -1,4 +1,7 @@
+mod mocked_blender_mcp;
 mod shared;
+
+pub use mocked_blender_mcp::MockedBlenderMcp;
 
 pub use shared::*;
 

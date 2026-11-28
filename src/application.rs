@@ -48,21 +48,18 @@ impl fmt::Display for ApplicationError {
 impl Error for ApplicationError {}
 
 pub struct Application {
-    pub(crate) input: interface::Input,
-    pub(crate) scroll_from_bottom: usize,
-    pub(crate) maximum_scroll: usize,
-    pub(crate) selection: Option<interface::ScreenSelection>,
-    pub(crate) screen_area: ratatui::layout::Rect,
     pub(crate) session: Session,
     pub(crate) error: Option<ApplicationError>,
     pub(crate) event_sender: EventSender,
     pub(crate) active_request: Option<tokio::task::JoinHandle<()>>,
     pub(crate) response_started: Option<Instant>,
-    pub(crate) pending_tool_calls: std::collections::VecDeque<crate::chats::ToolCall>,
+    pub(crate) pending_tool_calls: std::collections::VecDeque<crate::tools::ToolCall>,
     home_directory: std::path::PathBuf,
     pub(crate) mode: Mode,
     pub(crate) pending_authorization: Option<mpsc::UnboundedSender<String>>,
     pub(crate) clipboard_command: Option<Vec<String>>,
+    pub(crate) blender_connection: Option<std::sync::Arc<crate::mcp::Connection>>,
+    blender_server_command: Option<Vec<String>>,
 }
 
 impl Drop for Application {
@@ -89,13 +86,10 @@ pub fn build(settings: ApplicationSettings) -> Result<(Application, Events), App
         pending_tool_calls: std::collections::VecDeque::new(),
         home_directory: settings.home_directory,
         clipboard_command: settings.clipboard_command,
+        blender_connection: None,
+        blender_server_command: settings.blender_server_command,
         mode: settings.mode,
         pending_authorization: None,
-        input: interface::Input::default(),
-        scroll_from_bottom: usize::MAX,
-        maximum_scroll: 0,
-        selection: None,
-        screen_area: ratatui::layout::Rect::default(),
     };
     Ok((application, background_events))
 }
@@ -111,6 +105,22 @@ where
     EventSource: Stream<Item = io::Result<Event>> + Unpin,
 {
     let (mut application, mut background_events) = build(settings)?;
+    if !matches!(application.mode, Mode::OpenaiLogin)
+        && let Some(command) = application.blender_server_command.take()
+    {
+        match crate::mcp::Connection::connect(&command).await {
+            Ok(connection) => application.blender_connection = Some(connection),
+            Err(error) => {
+                if matches!(application.mode, Mode::SinglePrompt(_)) {
+                    eprintln!("MCP connection failed: {error}");
+                } else {
+                    application.error = Some(ApplicationError::Tool(format!(
+                        "MCP connection failed: {error}"
+                    )));
+                }
+            }
+        }
+    }
     match &application.mode {
         Mode::SinglePrompt(prompt) => {
             let prompt = prompt.clone();
@@ -161,7 +171,12 @@ where
     EventSource: Stream<Item = io::Result<Event>> + Unpin,
 {
     let (backend, events, terminal_mode) = create_terminal_resources();
-    let mut interface = build_interface(backend, events, terminal_mode)?;
+    let mut interface = build_interface(
+        backend,
+        events,
+        terminal_mode,
+        application.clipboard_command.clone(),
+    )?;
     let result = async {
         if matches!(application.mode, Mode::OpenaiLogin) {
             let (sender, input) = mpsc::unbounded_channel();
@@ -201,4 +216,47 @@ where
     }
     let restoration = interface::restore_terminal(&mut interface);
     result.and(restoration)
+}
+
+pub(crate) fn handle_action<BackendType: Backend, EventSource>(
+    application: &mut Application,
+    interface: &mut Interface<BackendType, EventSource>,
+    action: Option<interface::Action>,
+) -> bool {
+    match action {
+        Some(interface::Action::Exit) => return true,
+        Some(interface::Action::Abort) => chats::abort_response(application),
+        Some(interface::Action::Submit) => {
+            if application.pending_authorization.is_some() {
+                if let Some(input) = interface::take_input(interface)
+                    && let Some(sender) = &application.pending_authorization
+                {
+                    let _ = sender.send(input);
+                }
+            } else if !matches!(application.mode, Mode::OpenaiLogin)
+                && application.response_started.is_none()
+                && let Some(input) = interface::take_input(interface)
+            {
+                chats::send_message(application, input);
+            }
+        }
+        Some(interface::Action::SwitchContext { new_session })
+            if !matches!(application.mode, Mode::OpenaiLogin) =>
+        {
+            chats::abort_response(application);
+            application.session.cycle_context(new_session);
+            interface::reset_view(interface, new_session);
+            application.error = application.session.save(false).err();
+        }
+        Some(interface::Action::SwitchModel) => {
+            application.session.cycle_model();
+            if application.response_started.is_none()
+                && let Err(error) = application.session.save(false)
+            {
+                application.error = Some(error);
+            }
+        }
+        _ => {}
+    }
+    false
 }

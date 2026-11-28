@@ -2,6 +2,7 @@ pub mod application;
 mod chats;
 mod events;
 pub mod interface;
+mod mcp;
 mod models;
 mod providers;
 mod session;

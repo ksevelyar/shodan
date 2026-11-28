@@ -5,7 +5,7 @@ use std::{
 
 use serde::Deserialize;
 
-use super::{EditDisplay, replace_file_atomically, run_file_mutation};
+use super::{replace_file_atomically, run_file_mutation};
 
 pub(super) fn describe() -> serde_json::Value {
     serde_json::json!({"type":"function","function":{"name":"edit","description":"Edit one existing file with exact, unique, non-overlapping replacements matched against the original file. Include all changes to the file in one call.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"File path"},"edits":{"type":"array","minItems":1,"items":{"type":"object","properties":{"oldText":{"type":"string","description":"Nonempty text to replace, unique in the original file"},"newText":{"type":"string","description":"Replacement text"}},"required":["oldText","newText"]}}},"required":["path","edits"]}}})
@@ -24,11 +24,16 @@ pub(super) struct Replacement {
     new_text: String,
 }
 
-pub(super) async fn edit_file(arguments: EditArguments) -> Result<EditDisplay, String> {
+pub(super) async fn edit_file(
+    arguments: EditArguments,
+) -> Result<(String, String, String), String> {
     run_file_mutation(move |cancelled| apply_edits(arguments, cancelled)).await
 }
 
-fn apply_edits(arguments: EditArguments, cancelled: &AtomicBool) -> Result<EditDisplay, String> {
+fn apply_edits(
+    arguments: EditArguments,
+    cancelled: &AtomicBool,
+) -> Result<(String, String, String), String> {
     if arguments.edits.is_empty() {
         return Err("edits must contain at least one replacement".to_owned());
     }
@@ -91,9 +96,5 @@ fn apply_edits(arguments: EditArguments, cancelled: &AtomicBool) -> Result<EditD
         replace_file_atomically(&path, &updated, Some(&metadata), cancelled)
             .map_err(|error| format!("Could not write {}: {error}", arguments.path))?;
     }
-    Ok(EditDisplay {
-        path: arguments.path,
-        original,
-        updated,
-    })
+    Ok((arguments.path, original, updated))
 }

@@ -280,6 +280,14 @@ pub fn run_test_application_with_size(
     width: u16,
     height: u16,
 ) -> TestApplication {
+    run_test_application_with_server(settings.with_blender_server_command(None), width, height)
+}
+
+pub fn run_test_application_with_server(
+    settings: ApplicationSettings,
+    width: u16,
+    height: u16,
+) -> TestApplication {
     let backend = TestBackend::new(width, height);
     let (frames, receiver) = watch::channel(backend.buffer().clone());
     let backend = SharedTerminal { backend, frames };
