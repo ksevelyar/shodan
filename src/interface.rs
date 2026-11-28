@@ -3,9 +3,9 @@ mod input;
 mod markdown;
 mod theme;
 
-pub(crate) use input::Input;
+use input::Input;
 
-use std::{io, ops::ControlFlow, path::Path, sync::OnceLock};
+use std::{io, path::Path, sync::OnceLock};
 
 #[cfg(unix)]
 use crossterm::event::{
@@ -35,9 +35,9 @@ use tokio::io::AsyncWriteExt;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
-    application::{Application, ApplicationError},
-    chats::{Message, abort_response, send_message},
-    session::Statistics,
+    application::ApplicationError,
+    chats::Message,
+    session::{Session, Statistics},
     tools::{ToolCall, ToolOutput},
 };
 
@@ -199,6 +199,16 @@ pub struct Interface<BackendType: Backend, EventSource> {
     events: EventSource,
     terminal_session: Option<TerminalSession>,
     formatted_messages: FormattedMessages,
+    state: InterfaceState,
+    clipboard_command: Option<Vec<String>>,
+}
+
+struct InterfaceState {
+    input: Input,
+    scroll_from_bottom: usize,
+    maximum_scroll: usize,
+    selection: Option<ScreenSelection>,
+    screen_area: Rect,
 }
 
 #[derive(Default)]
@@ -218,6 +228,7 @@ pub fn build_interface<BackendType: Backend, EventSource>(
     backend: BackendType,
     events: EventSource,
     terminal_mode: TerminalMode,
+    clipboard_command: Option<Vec<String>>,
 ) -> Result<Interface<BackendType, EventSource>, ApplicationError>
 where
     BackendType::Error: Send + Sync + 'static,
@@ -236,6 +247,14 @@ where
         events,
         terminal_session,
         formatted_messages: FormattedMessages::default(),
+        state: InterfaceState {
+            input: Input::default(),
+            scroll_from_bottom: usize::MAX,
+            maximum_scroll: 0,
+            selection: None,
+            screen_area: Rect::default(),
+        },
+        clipboard_command,
     })
 }
 
@@ -263,7 +282,7 @@ struct SelectionPosition {
     column: u16,
 }
 
-pub(crate) struct ScreenSelection {
+struct ScreenSelection {
     anchor: SelectionPosition,
     focus: SelectionPosition,
     dragging: bool,
@@ -274,20 +293,30 @@ pub(crate) struct ScreenSelection {
 
 pub(crate) fn draw<BackendType: Backend, EventSource>(
     interface: &mut Interface<BackendType, EventSource>,
-    application: &mut Application,
+    session: &Session,
+    error: Option<&ApplicationError>,
+    response_started: Option<tokio::time::Instant>,
 ) -> Result<(), ApplicationError>
 where
     BackendType::Error: Send + Sync + 'static,
 {
+    let state = &mut interface.state;
     interface
         .terminal
         .draw(|frame| {
-            if application.screen_area != frame.area() {
-                application.selection = None;
-                application.screen_area = frame.area();
+            if state.screen_area != frame.area() {
+                state.selection = None;
+                state.screen_area = frame.area();
             }
-            draw_interface(frame, application, &mut interface.formatted_messages);
-            let input_height = application
+            draw_interface(
+                frame,
+                state,
+                &mut interface.formatted_messages,
+                session,
+                error,
+                response_started,
+            );
+            let input_height = state
                 .input
                 .get_height(frame.area().width, frame.area().height);
             let conversation_height = frame
@@ -296,15 +325,15 @@ where
                 .saturating_sub(input_height.saturating_add(5));
             draw_selection(
                 frame,
-                &mut application.selection,
-                application
+                &mut state.selection,
+                state
                     .maximum_scroll
-                    .saturating_sub(application.scroll_from_bottom),
+                    .saturating_sub(state.scroll_from_bottom),
                 conversation_height,
             );
         })
         .map_err(|error| ApplicationError::Terminal(format!("Terminal failed: {error}")))?;
-    if let Some(selection) = application
+    if let Some(selection) = state
         .selection
         .as_mut()
         .filter(|selection| selection.copy_pending)
@@ -312,13 +341,46 @@ where
         selection.copy_pending = false;
         let text = get_selected_text(selection);
         if !text.is_empty() {
-            let clipboard_command = application.clipboard_command.clone();
+            let clipboard_command = interface.clipboard_command.clone();
             tokio::spawn(async move {
                 copy_to_clipboard(&text, clipboard_command.as_deref()).await;
             });
         }
     }
     Ok(())
+}
+
+pub(crate) fn take_input<BackendType: Backend, EventSource>(
+    interface: &mut Interface<BackendType, EventSource>,
+) -> Option<String> {
+    (!interface.state.input.is_empty()).then(|| interface.state.input.take())
+}
+
+pub(crate) fn reset_view<BackendType: Backend, EventSource>(
+    interface: &mut Interface<BackendType, EventSource>,
+    new_session: bool,
+) {
+    interface.state.selection = None;
+    if new_session {
+        interface.state.scroll_from_bottom = usize::MAX;
+    }
+}
+
+pub(crate) fn finish_login<BackendType: Backend, EventSource>(
+    interface: &mut Interface<BackendType, EventSource>,
+) {
+    interface.state.input.clear();
+    interface.state.selection = None;
+    interface.state.scroll_from_bottom = 0;
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Action {
+    Exit,
+    Submit,
+    Abort,
+    SwitchContext { new_session: bool },
+    SwitchModel,
 }
 
 pub(crate) enum InterfaceInput {
@@ -350,60 +412,51 @@ where
     }
 }
 
-pub(crate) fn handle_input(
-    application: &mut Application,
+pub(crate) fn handle_input<BackendType: Backend, EventSource>(
+    interface: &mut Interface<BackendType, EventSource>,
     input: InterfaceInput,
-) -> ControlFlow<()> {
+    messages: &[Message],
+) -> Option<Action> {
+    let state = &mut interface.state;
     match input {
-        InterfaceInput::Exit => ControlFlow::Break(()),
+        InterfaceInput::Exit => Some(Action::Exit),
         InterfaceInput::Key(key)
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) =>
         {
-            ControlFlow::Break(())
+            Some(Action::Exit)
         }
-        InterfaceInput::Key(key) => {
-            handle_key(application, key);
-            ControlFlow::Continue(())
-        }
+        InterfaceInput::Key(key) => handle_key(state, key, messages),
         InterfaceInput::Paste(text) => {
-            application.input.insert(&text);
-            ControlFlow::Continue(())
+            state.input.insert(&text);
+            None
         }
         InterfaceInput::Mouse(mouse) => {
             match mouse.kind {
-                MouseEventKind::ScrollUp => scroll_up(application, 3),
-                MouseEventKind::ScrollDown => scroll_down(application, 3),
-                MouseEventKind::Down(MouseButton::Left) => begin_selection(application, mouse),
-                MouseEventKind::Drag(MouseButton::Left) => {
-                    update_selection(application, mouse, true);
-                }
-                MouseEventKind::Up(MouseButton::Left) => {
-                    update_selection(application, mouse, false);
-                }
+                MouseEventKind::ScrollUp => scroll_up(state, 3),
+                MouseEventKind::ScrollDown => scroll_down(state, 3),
+                MouseEventKind::Down(MouseButton::Left) => begin_selection(state, mouse),
+                MouseEventKind::Drag(MouseButton::Left) => update_selection(state, mouse, true),
+                MouseEventKind::Up(MouseButton::Left) => update_selection(state, mouse, false),
                 _ => {}
             }
-            ControlFlow::Continue(())
+            None
         }
-        InterfaceInput::Redraw => ControlFlow::Continue(()),
+        InterfaceInput::Redraw => None,
     }
 }
 
-fn handle_key(application: &mut Application, key: KeyEvent) {
+fn handle_key(state: &mut InterfaceState, key: KeyEvent, messages: &[Message]) -> Option<Action> {
     match key.code {
         KeyCode::Char(character)
             if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
         {
-            application.input.insert(&character.to_string());
+            state.input.insert(&character.to_string());
         }
-        KeyCode::Backspace => {
-            application.input.delete_previous();
-        }
-        KeyCode::Left => application.input.move_left(),
-        KeyCode::Right => application.input.move_right(),
+        KeyCode::Backspace => state.input.delete_previous(),
+        KeyCode::Left => state.input.move_left(),
+        KeyCode::Right => state.input.move_right(),
         KeyCode::Up | KeyCode::Down => {
-            let history = application
-                .session
-                .messages
+            let history = messages
                 .iter()
                 .filter_map(|message| {
                     if let Message::User(text) = message {
@@ -413,78 +466,49 @@ fn handle_key(application: &mut Application, key: KeyEvent) {
                     }
                 })
                 .collect::<Vec<_>>();
-            let width = usize::from(application.screen_area.width);
-            application
-                .input
-                .move_vertical(key.code == KeyCode::Up, width, &history);
+            state.input.move_vertical(
+                key.code == KeyCode::Up,
+                usize::from(state.screen_area.width),
+                &history,
+            );
         }
-        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-            application.input.insert("\n");
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => state.input.insert("\n"),
+        KeyCode::Esc => return Some(Action::Abort),
+        KeyCode::Tab => {
+            return Some(Action::SwitchContext {
+                new_session: key.modifiers.contains(KeyModifiers::CONTROL),
+            });
         }
-        KeyCode::Esc => abort_response(application),
-        KeyCode::Tab if !matches!(application.mode, crate::settings::Mode::OpenaiLogin) => {
-            abort_response(application);
-            application
-                .session
-                .cycle_context(key.modifiers.contains(KeyModifiers::CONTROL));
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                application.scroll_from_bottom = usize::MAX;
-            }
-            application.selection = None;
-            application.error = application.session.save(false).err();
-        }
-        KeyCode::Enter
-            if application.pending_authorization.is_some() && !application.input.is_empty() =>
-        {
-            let input = application.input.take();
-            if let Some(pending_authorization) = &application.pending_authorization {
-                let _ = pending_authorization.send(input);
-            }
-        }
-        KeyCode::Enter
-            if !matches!(application.mode, crate::settings::Mode::OpenaiLogin)
-                && application.response_started.is_none()
-                && !application.input.is_empty() =>
-        {
-            let input = application.input.take();
-            send_message(application, input);
-        }
+        KeyCode::Enter => return Some(Action::Submit),
         KeyCode::Char(' ') if key.modifiers == KeyModifiers::CONTROL => {
-            application.session.cycle_model();
-            if application.response_started.is_none()
-                && let Err(error) = application.session.save(false)
-            {
-                application.error = Some(error);
-            }
+            return Some(Action::SwitchModel);
         }
         KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            application.scroll_from_bottom = 0;
+            state.scroll_from_bottom = 0;
         }
-        KeyCode::PageUp => scroll_up(application, 8),
-        KeyCode::PageDown => scroll_down(application, 8),
+        KeyCode::PageUp => scroll_up(state, 8),
+        KeyCode::PageDown => scroll_down(state, 8),
         _ => {}
     }
+    None
 }
 
-fn get_selection_position(
-    application: &Application,
-    mouse: MouseEvent,
-) -> Option<SelectionPosition> {
-    let area = application.screen_area;
+fn get_selection_position(state: &InterfaceState, mouse: MouseEvent) -> Option<SelectionPosition> {
+    let area = state.screen_area;
     if area.width == 0 || area.height == 0 {
         return None;
     }
     let row = mouse.row.clamp(area.y, area.bottom() - 1) - area.y;
-    let input_height = application.input.get_height(area.width, area.height);
+    let input_height = state.input.get_height(area.width, area.height);
     let conversation_height = area.height.saturating_sub(input_height.saturating_add(5));
     let selection_row = if row == 0 {
         SelectionRow::Top
     } else if row == 1 {
         SelectionRow::Separator
     } else if row <= conversation_height + 1 {
-        let viewport_start = application
+        let viewport_start = state
             .maximum_scroll
-            .saturating_sub(application.scroll_from_bottom);
+            .saturating_sub(state.scroll_from_bottom);
         SelectionRow::Conversation(viewport_start + usize::from(row - 2))
     } else {
         SelectionRow::Panel(row - conversation_height - 2)
@@ -495,23 +519,22 @@ fn get_selection_position(
     })
 }
 
-fn begin_selection(application: &mut Application, mouse: MouseEvent) {
-    application.selection =
-        get_selection_position(application, mouse).map(|position| ScreenSelection {
-            anchor: position,
-            focus: position,
-            dragging: true,
-            drag_pointer: None,
-            selected_content: std::collections::BTreeMap::new(),
-            copy_pending: false,
-        });
+fn begin_selection(state: &mut InterfaceState, mouse: MouseEvent) {
+    state.selection = get_selection_position(state, mouse).map(|position| ScreenSelection {
+        anchor: position,
+        focus: position,
+        dragging: true,
+        drag_pointer: None,
+        selected_content: std::collections::BTreeMap::new(),
+        copy_pending: false,
+    });
 }
 
-fn update_selection(application: &mut Application, mouse: MouseEvent, dragging: bool) {
-    let Some(position) = get_selection_position(application, mouse) else {
+fn update_selection(state: &mut InterfaceState, mouse: MouseEvent, dragging: bool) {
+    let Some(position) = get_selection_position(state, mouse) else {
         return;
     };
-    let Some(selection) = application
+    let Some(selection) = state
         .selection
         .as_mut()
         .filter(|selection| selection.dragging)
@@ -555,35 +578,41 @@ fn get_selected_text(selection: &ScreenSelection) -> String {
     lines.join("\n")
 }
 
-pub(crate) fn is_selection_dragging(application: &Application) -> bool {
-    application
+pub(crate) fn is_selection_dragging<BackendType: Backend, EventSource>(
+    interface: &Interface<BackendType, EventSource>,
+) -> bool {
+    let state = &interface.state;
+    state
         .selection
         .as_ref()
         .is_some_and(|selection| selection.drag_pointer.is_some())
 }
 
-pub(crate) fn advance_selection_scroll(application: &mut Application) {
-    let Some(mouse) = application
+pub(crate) fn advance_selection_scroll<BackendType: Backend, EventSource>(
+    interface: &mut Interface<BackendType, EventSource>,
+) {
+    let state = &mut interface.state;
+    let Some(mouse) = state
         .selection
         .as_ref()
         .and_then(|selection| selection.drag_pointer)
     else {
         return;
     };
-    let area = application.screen_area;
-    let input_height = application.input.get_height(area.width, area.height);
+    let area = state.screen_area;
+    let input_height = state.input.get_height(area.width, area.height);
     let conversation_height = area.height.saturating_sub(input_height.saturating_add(5));
     if conversation_height == 0 {
         return;
     }
     if mouse.row <= area.y + 2 {
-        scroll_up(application, 1);
+        scroll_up(state, 1);
     } else if mouse.row == area.y + conversation_height + 1 {
-        scroll_down(application, 1);
+        scroll_down(state, 1);
     } else {
         return;
     }
-    update_selection(application, mouse, true);
+    update_selection(state, mouse, true);
 }
 
 fn draw_selection(
@@ -649,17 +678,17 @@ fn draw_selection(
     }
 }
 
-fn scroll_up(application: &mut Application, lines: usize) {
-    application.scroll_from_bottom = application
+fn scroll_up(state: &mut InterfaceState, lines: usize) {
+    state.scroll_from_bottom = state
         .scroll_from_bottom
         .saturating_add(lines)
-        .min(application.maximum_scroll);
+        .min(state.maximum_scroll);
 }
 
-fn scroll_down(application: &mut Application, lines: usize) {
-    application.scroll_from_bottom = application
+fn scroll_down(state: &mut InterfaceState, lines: usize) {
+    state.scroll_from_bottom = state
         .scroll_from_bottom
-        .min(application.maximum_scroll)
+        .min(state.maximum_scroll)
         .saturating_sub(lines);
 }
 
@@ -1091,8 +1120,11 @@ impl FormattedMessages {
 
 fn draw_interface(
     frame: &mut Frame<'_>,
-    application: &mut Application,
+    state: &mut InterfaceState,
     formatted_messages: &mut FormattedMessages,
+    session: &Session,
+    error: Option<&ApplicationError>,
+    response_started: Option<tokio::time::Instant>,
 ) {
     frame.render_widget(
         Block::default().style(
@@ -1102,12 +1134,12 @@ fn draw_interface(
         ),
         frame.area(),
     );
-    let input_height = application
+    let input_height = state
         .input
         .get_height(frame.area().width, frame.area().height);
-    let statistics = &application.session.statistics;
-    let scroll_from_bottom = &mut application.scroll_from_bottom;
-    let maximum_scroll = &mut application.maximum_scroll;
+    let statistics = &session.statistics;
+    let scroll_from_bottom = &mut state.scroll_from_bottom;
+    let maximum_scroll = &mut state.maximum_scroll;
     let panels = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -1115,7 +1147,7 @@ fn draw_interface(
     ])
     .split(frame.area());
     frame.render_widget(
-        Paragraph::new(application.session.get_context_name())
+        Paragraph::new(session.get_context_name())
             .style(Style::default().fg(Color::from(Palette::PanelText))),
         panels[0],
     );
@@ -1128,8 +1160,8 @@ fn draw_interface(
     ])
     .split(panels[2]);
     let width = usize::from(areas[0].width).max(1);
-    formatted_messages.update(&application.session.messages, width);
-    let error_lines = application.error.as_ref().map_or_else(Vec::new, |error| {
+    formatted_messages.update(&session.messages, width);
+    let error_lines = error.map_or_else(Vec::new, |error| {
         textwrap::wrap(&format!("Request failed: {error}"), width)
             .into_iter()
             .map(|line| {
@@ -1171,14 +1203,8 @@ fn draw_interface(
             area,
         );
     }
-    application.input.draw(frame, areas[2]);
-    draw_status(
-        frame,
-        areas[4],
-        statistics,
-        application.response_started,
-        &application.session,
-    );
+    state.input.draw(frame, areas[2]);
+    draw_status(frame, areas[4], statistics, response_started, session);
 }
 
 fn draw_status(

@@ -170,9 +170,6 @@ fn finish_login(application: &mut Application) {
     application.active_request = None;
     application.pending_authorization = None;
     application.session.clear_messages();
-    application.input.clear();
-    application.scroll_from_bottom = 0;
-    application.selection = None;
     application.mode = crate::settings::Mode::Interactive;
 }
 

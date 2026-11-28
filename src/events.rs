@@ -107,19 +107,29 @@ where
     EventSource: Stream<Item = io::Result<TerminalEvent>> + Unpin,
 {
     loop {
-        interface::draw(interface, application)?;
+        interface::draw(
+            interface,
+            &application.session,
+            application.error.as_ref(),
+            application.response_started,
+        )?;
         tokio::select! {
             input = interface::wait_for_input(interface) => {
-                if interface::handle_input(application, input?).is_break() {
+                let action = interface::handle_input(interface, input?, &application.session.messages);
+                if crate::application::handle_action(application, interface, action) {
                     return Ok(());
                 }
             }
             event = events.recv() => {
                 let event = event.expect("the application holds an event sender");
+                let login_succeeded = matches!(event, Event::LoginSucceeded);
                 chats::apply_event(application, event);
+                if login_succeeded {
+                    interface::finish_login(interface);
+                }
             }
-            () = tokio::time::sleep(Duration::from_millis(80)), if application.response_started.is_some() || interface::is_selection_dragging(application) => {
-                interface::advance_selection_scroll(application);
+            () = tokio::time::sleep(Duration::from_millis(80)), if application.response_started.is_some() || interface::is_selection_dragging(interface) => {
+                interface::advance_selection_scroll(interface);
             }
         }
     }
